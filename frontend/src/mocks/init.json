@@ -27,25 +27,196 @@
         "customer_ref"
       ],
       "rows": [
-        ["POS-1038", "12/10/2026", "Bisi A.", "Indomie-Carton-70g", "4", "₦30,000", "Transfer", "TRF-88104"],
-        ["POS-1039", "12/10/2026", "Chinedu O.", "Peak-Milk-400g", "4", "15,000", "Cash", ""],
-        ["POS-1040", "2026-10-13", "Chinedu O. ", "Golden-Penny-Semovita-10kg", "3", "36,000.00", "transfer", "TRF-88159"],
-        ["POS-1041", "Oct 13 2026", "Fatima S.", "Milo-Refill-800g", "2", "₦12,000", "POS Card", ""],
-        ["POS-1042", "14/10/2026", "Bisi A.", "Peak-Milk-400g", "12", "₦45,000", "Transfer", "TRF-88213"],
-        ["POS-1043", "2026-10-14", "Bisi A. ", "Devon-Kings-Oil-5L", "1", "15000", "Cash", ""],
-        ["POS-1044", "14/10/2026", "Fatima S.", "Indomie-Carton-70g", "2", "15,000.00", "Cash", ""],
-        ["POS-1045", "Oct 14 2026", "Fatima S.", "Devon-Kings-Oil-5L", "2", "30000", "TRANSFER", "TRF-88241"],
-        ["POS-1046", "15/10/2026", "Chinedu O.", "Golden-Penny-Semovita-10kg", "1", "₦12,000", "POS Card", ""],
-        ["POS-1047", "15/10/2026", "bisi a.", "Dangote-Sugar-50kg", "1", "₦65,000.00", "Transfer", "TRF-88267"],
-        ["POS-1048", "2026-10-15", "Fatima S. ", "Peak-Milk-400g", "6", "22,500", "Cash", ""],
-        ["POS-1049", "2026-10-15", "Chinedu O.", "Devon-Kings-Oil-5L", "3", "45,000.00", "Transfer", "TRF-88290"],
-        ["POS-1050", "16/10/2026", "Bisi A.", "Milo-Refill-800g", "3", "₦18,000", "Cash", ""],
-        ["POS-1051", "16/10/2026", "Fatima S. ", "Milo-Refill-800g", "5", "30,000", "transfer", "TRF-88312"],
-        ["POS-1052", "Oct 16 2026", "Chinedu O.", "Indomie-Carton-70g", "6", "45000", "POS Card", ""],
-        ["POS-1053", "Oct 16 2026", "Bisi A.", "Golden-Penny-Semovita-10kg", "2", "₦24,000", "Transfer", "TRF-88345"],
-        ["POS-1054", "17/10/2026", "Fatima S.", "Peak-Milk-400g", "8", "₦30,000", "Transfer", "TRF-88378"],
-        ["POS-1055", "2026-10-17", "Bisi A. ", "Milo-Refill-800g", "4", "24,000.00", "TRANSFER", "TRF-88401"],
-        ["POS-1056", "Oct 18 2026", "Chinedu O.", "Devon-Kings-Oil-5L", "1", "15000", "Transfer", "TRF-88429"]
+        [
+          "POS-1038",
+          "2026-10-11",
+          "BISI A.",
+          "Milo-Refill-800g",
+          "4",
+          "24,000",
+          "Cash",
+          ""
+        ],
+        [
+          "POS-1039",
+          "2026-10-12",
+          "Bisi A.",
+          "Dangote-Sugar-50kg",
+          "1",
+          "65,000",
+          "TRANSFER",
+          "TRF-88139"
+        ],
+        [
+          "POS-1040",
+          "Oct 13 2026",
+          "Chinedu O. ",
+          "Peak-Milk-400g",
+          "2",
+          "₦7,500.00",
+          "Cash",
+          ""
+        ],
+        [
+          "POS-1041",
+          "2026-10-14",
+          "Ngozi E. ",
+          "Indomie-Carton-70g",
+          "5",
+          "37,500",
+          "Transfer",
+          "TRF-88162"
+        ],
+        [
+          "POS-1042",
+          "Oct 14 2026",
+          "FATIMA S.",
+          "Peak-Milk-400g",
+          "12",
+          "₦45,000",
+          "Transfer",
+          "TRF-88190"
+        ],
+        [
+          "POS-1043",
+          "2026-10-15",
+          "Bisi A.",
+          "indomie-carton-70g",
+          "4",
+          "30000",
+          "transfer",
+          "TRF-88241"
+        ],
+        [
+          "POS-1044",
+          "2026-10-15",
+          "Bisi A.",
+          "dangote-sugar-50kg",
+          "1",
+          "65000",
+          "POS Card",
+          ""
+        ],
+        [
+          "POS-1045",
+          "15/10/2026",
+          "ngozi e.",
+          "Peak-Milk-400g",
+          "3",
+          "11,250.00",
+          "POS Card",
+          ""
+        ],
+        [
+          "POS-1046",
+          "15/10/2026",
+          "ngozi e.",
+          "Golden-Penny-Semovita-10kg",
+          "4",
+          "48,000.00",
+          "Transfer",
+          "TRF-88276"
+        ],
+        [
+          "POS-1047",
+          "15/10/2026",
+          "Bisi A.",
+          "Milo-Refill-800g",
+          "3",
+          "₦18,000.00",
+          "Transfer",
+          "TRF-88321"
+        ],
+        [
+          "POS-1048",
+          "Oct 15 2026",
+          "Chinedu O.",
+          "Milo-Refill-800g",
+          "7",
+          "₦42,000.00",
+          "transfer",
+          "TRF-88353"
+        ],
+        [
+          "POS-1049",
+          "Oct 16 2026",
+          "Chinedu O. ",
+          "Devon-Kings-Oil-5L",
+          "3",
+          "45,000",
+          "Transfer",
+          "TRF-88401"
+        ],
+        [
+          "POS-1050",
+          "16/10/2026",
+          "Bisi A.",
+          "Indomie-Carton-70g",
+          "3",
+          "22500",
+          "Transfer",
+          "TRF-88456"
+        ],
+        [
+          "POS-1051",
+          "17/10/2026",
+          "Chinedu O.",
+          "Milo-Refill-800g",
+          "2",
+          "₦12,000.00",
+          "TRANSFER",
+          "TRF-88505"
+        ],
+        [
+          "POS-1052",
+          "18/10/2026",
+          "Bisi A.",
+          "Dangote-Sugar-50kg",
+          "1",
+          "65000",
+          "cash",
+          ""
+        ],
+        [
+          "POS-1053",
+          "Oct 18 2026",
+          "Chinedu O.",
+          "Devon-Kings-Oil-5L",
+          "4",
+          "₦60,000.00",
+          "Transfer",
+          "TRF-88533"
+        ],
+        [
+          "POS-1054",
+          "2026-10-18",
+          "Chinedu O.",
+          "Indomie-Carton-70g",
+          "1",
+          "₦7,500",
+          "Transfer",
+          "TRF-88571"
+        ],
+        [
+          "POS-1055",
+          "Oct 19 2026",
+          "BISI A.",
+          "Golden-Penny-Semovita-10kg",
+          "5",
+          "60000",
+          "Cash",
+          ""
+        ],
+        [
+          "POS-1056",
+          "19/10/2026",
+          "Bisi A.",
+          "Dangote-Sugar-50kg",
+          "1",
+          "65,000.00",
+          "POS Card",
+          ""
+        ]
       ]
     },
     "waybills": {
@@ -59,21 +230,126 @@
         "driver"
       ],
       "rows": [
-        ["WB-3301", "11/10/2026", "Indomie-Carton-70g", "40", "Alimosho Branch", "Musa K."],
-        ["WB-3302", "2026-10-11", "Golden-Penny-Semovita-10kg", "25", "Alimosho Branch ", "Tunde B."],
-        ["WB-3303", "Oct 12 2026", "Devon-Kings-Oil-5L", "18", "alimosho branch", "Musa K. "],
-        ["WB-3304", "12/10/2026", "Dangote-Sugar-50kg", "10", "Alimosho Branch", "Sani M."],
-        ["WB-3305", "2026-10-13", "Milo-Refill-800g", "30", "Alimosho Branch", "Tunde B."],
-        ["WB-3306", "13/10/2026", "Indomie-Carton-70g", "20", "ALIMOSHO BRANCH", "Musa K."],
-        ["WB-3307", "14/10/2026", "Peak-Milk-400g", "24", "Alimosho Branch", "Musa K."],
-        ["WB-3308", "Oct 14 2026", "Devon-Kings-Oil-5L", "12", "Alimosho Branch ", "Sani M. "],
-        ["WB-3309", "15/10/2026", "Golden-Penny-Semovita-10kg", "15", "Alimosho Branch", "Tunde B."],
-        ["WB-3310", "2026-10-15", "Milo-Refill-800g", "16", "alimosho branch", "Sani M."],
-        ["WB-3311", "2026-10-14", "Peak-Mlk-400g", "24", "alimosho branch ", "Musa K."],
-        ["WB-3312", "16/10/2026", "Dangote-Sugar-50kg", "8", "Alimosho Branch", "Tunde B. "],
-        ["WB-3313", "Oct 16 2026", "Indomie-Carton-70g", "35", "Alimosho Branch", "Musa K."],
-        ["WB-3314", "17/10/2026", "Peak-Milk-400g", "36", "Alimosho Branch", "Sani M."],
-        ["WB-3315", "2026-10-18", "Devon-Kings-Oil-5L", "20", "Alimosho Branch ", "Tunde B."]
+        [
+          "WB-3301",
+          "Oct 10 2026",
+          "Milo-Refill-800g",
+          "36",
+          "alimosho branch",
+          "Sani M."
+        ],
+        [
+          "WB-3302",
+          "Oct 10 2026",
+          "Golden-Penny-Semovita-10kg",
+          "22",
+          "alimosho branch",
+          "Sani M. "
+        ],
+        [
+          "WB-3303",
+          "2026-10-10",
+          "Peak-Milk-400g",
+          "38",
+          "Alimosho Branch",
+          "Sani M. "
+        ],
+        [
+          "WB-3304",
+          "11/10/2026",
+          "Devon-Kings-Oil-5L",
+          "24",
+          "Alimosho Branch",
+          "Sani M."
+        ],
+        [
+          "WB-3305",
+          "12/10/2026",
+          "Golden-Penny-Semovita-10kg",
+          "16",
+          "Alimosho Branch ",
+          "Sani M."
+        ],
+        [
+          "WB-3306",
+          "2026-10-13",
+          "Milo-Refill-800g",
+          "18",
+          "Alimosho Branch",
+          "Sani M."
+        ],
+        [
+          "WB-3307",
+          "2026-10-14",
+          "Golden-Penny-Semovita-10kg",
+          "30",
+          "Alimosho Branch ",
+          "Tunde B."
+        ],
+        [
+          "WB-3308",
+          "Oct 15 2026",
+          "Peak-Milk-400g",
+          "10",
+          "Alimosho Branch",
+          "Musa K."
+        ],
+        [
+          "WB-3309",
+          "Oct 16 2026",
+          "Milo-Refill-800g",
+          "34",
+          "Alimosho Branch",
+          "Sani M."
+        ],
+        [
+          "WB-3310",
+          "2026-10-16",
+          "Peak-Milk-400g",
+          "30",
+          "Alimosho Branch ",
+          "Sani M."
+        ],
+        [
+          "WB-3311",
+          "Oct 14 2026",
+          "Golde-Penny-Semovita-10kg",
+          "30",
+          "Alimosho Branch",
+          "Tunde B."
+        ],
+        [
+          "WB-3312",
+          "Oct 16 2026",
+          "Devon-Kings-Oil-5L",
+          "38",
+          "Alimosho Branch",
+          "Musa K. "
+        ],
+        [
+          "WB-3313",
+          "2026-10-17",
+          "Devon-Kings-Oil-5L",
+          "28",
+          "Alimosho Branch",
+          "Musa K. "
+        ],
+        [
+          "WB-3314",
+          "2026-10-18",
+          "Dangote-Sugar-50kg",
+          "34",
+          "alimosho branch",
+          "Musa K."
+        ],
+        [
+          "WB-3315",
+          "19/10/2026",
+          "Milo-Refill-800g",
+          "24",
+          "Alimosho Branch",
+          "Sani M."
+        ]
       ]
     },
     "bank": {
@@ -85,20 +361,75 @@
         "credit_amount"
       ],
       "rows": [
-        ["GTB-551810", "12/10/2026", "NIP CR/ADEWALE STORES/TRF-88104", "30000.00"],
-        ["GTB-551844", "2026-10-13", "TRF FROM NKECHI ENT/TRF-88159", "₦36,000"],
-        ["GTB-551879", "Oct 14 2026", "NIP CR/IYABO CATERING/TRF-88241", "30,000.00"],
-        ["GTB-551902", "15/10/2026", "TRF FROM ADEBAYO BAKERY/TRF-88267", "65000"],
-        ["GTB-551918", "2026-10-15", "TRF FROM OKONKWO TRADERS/TRF-88290", "45,000.00"],
-        ["GTB-551941", "16/10/2026", "NIP CR/OLUWASEUN MART/TRF-88312", "30000.00"],
-        ["GTB-551965", "Oct 16 2026", "TRF FROM BALOGUN FOODS/TRF-88345", "24,000"],
-        ["GTB-551988", "17/10/2026", "NIP CR/KEMI SUPERSTORE/TRF-88378", "30,000.00"],
-        ["GTB-552014", "2026-10-17", "TRF FROM DANJUMA PROVISIONS/TRF-88401", "₦24,000.00"],
-        ["GTB-552039", "Oct 18 2026", "NIP CR/EZEKIEL MINI MART/TRF-88429", "15,000"]
+        [
+          "GTB-551845",
+          "2026-10-12",
+          "TRF FROM YUSUF GENERAL GOODS/TRF-88139",
+          "65000"
+        ],
+        [
+          "GTB-551883",
+          "Oct 14 2026",
+          "TRF FROM IYABO CATERING/TRF-88162",
+          "₦37,500.00"
+        ],
+        [
+          "GTB-551908",
+          "2026-10-15",
+          "NIP CR/DANJUMA PROVISIONS/TRF-88276",
+          "48000"
+        ],
+        [
+          "GTB-551932",
+          "Oct 15 2026",
+          "NIP CR/OKONKWO TRADERS/TRF-88321",
+          "₦18,000.00"
+        ],
+        [
+          "GTB-551957",
+          "16/10/2026",
+          "TRF FROM CHIOMA VENTURES/TRF-88241",
+          "₦30,000.00"
+        ],
+        [
+          "GTB-551988",
+          "2026-10-16",
+          "NIP CR/KEMI SUPERSTORE/TRF-88353",
+          "42000.00"
+        ],
+        [
+          "GTB-552004",
+          "16/10/2026",
+          "NIP CR/EZEKIEL MINI MART/TRF-88456",
+          "22,500.00"
+        ],
+        [
+          "GTB-552042",
+          "17/10/2026",
+          "TRF FROM OLUWASEUN MART/TRF-88401",
+          "45,000"
+        ],
+        [
+          "GTB-552058",
+          "17/10/2026",
+          "NIP CR/BALOGUN FOODS/TRF-88505",
+          "₦12,000"
+        ],
+        [
+          "GTB-552089",
+          "19/10/2026",
+          "TRF FROM OBINNA SUPPLIES/TRF-88533",
+          "₦60,000"
+        ],
+        [
+          "GTB-552110",
+          "Oct 19 2026",
+          "NIP CR/ADEWALE STORES/TRF-88571",
+          "7500.00"
+        ]
       ]
     }
   },
-  "dataset_hash": "sha256:4be19d8f3c2a70e61b55d94a8c3f1e209b7a6d4c8e1f0a2b3c4d5e6f7a8b9c0d",
+  "dataset_hash": "sha256:272826a68605f14587361d40627e80c9654ba1a4d98c2d46a9a6cbda5e74dc82",
   "max_hint_level": 3
 }
-

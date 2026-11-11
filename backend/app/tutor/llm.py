@@ -35,6 +35,9 @@ def complete(messages: list[dict], *, max_tokens: int = 160) -> str | None:
             request_timeout=settings.llm_timeout_s,
             max_tokens=max_tokens,
             temperature=0.5,
+            # LiteLLM retries internally by default, which blows straight through our
+            # deadline. One attempt, then the template.
+            num_retries=0,
         )
         text = response["choices"][0]["message"]["content"]
     except Exception as exc:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,12 +20,23 @@ logging.basicConfig(
 log = logging.getLogger("reconcore")
 
 
+def _prewarm_llm() -> None:
+    """Importing litellm costs a couple of seconds; pay it at boot, not on the
+    candidate's first request."""
+    try:
+        import litellm  # noqa: F401
+    except Exception as exc:  # pragma: no cover - import problems fall back anyway
+        log.warning("litellm could not be pre-imported: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
     from app.credentials.keys import load_or_create_issuer_key
 
     load_or_create_issuer_key()
+    if get_settings().llm_available:
+        threading.Thread(target=_prewarm_llm, daemon=True).start()
     yield
 
 

@@ -13,20 +13,29 @@
       "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json"
     ],
     "id": "urn:uuid:7c1e9b40-8a2d-4f19-9c3b-2d6e8f1a4b90",
-    "type": ["VerifiableCredential", "OpenBadgeCredential"],
+    "type": [
+      "VerifiableCredential",
+      "OpenBadgeCredential"
+    ],
     "issuer": {
       "id": "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH",
-      "type": ["Profile"],
+      "type": [
+        "Profile"
+      ],
       "name": "ReconCore"
     },
     "validFrom": "2026-11-12T08:40:11Z",
     "name": "Multi-Source Financial Reconciliation",
     "credentialSubject": {
-      "type": ["AchievementSubject"],
+      "type": [
+        "AchievementSubject"
+      ],
       "name": "Ada Okafor",
       "achievement": {
         "id": "urn:reconcore:achievement:reconciliation-l1",
-        "type": ["Achievement"],
+        "type": [
+          "Achievement"
+        ],
         "name": "Multi-Source Financial Reconciliation — Level 1",
         "description": "Reconciled POS, warehouse and bank records to find an unsettled transfer and a duplicate waybill.",
         "criteria": {
@@ -35,17 +44,21 @@
       },
       "result": [
         {
-          "type": ["Result"],
+          "type": [
+            "Result"
+          ],
           "value": "3/3 exact"
         }
       ]
     },
     "evidence": [
       {
-        "type": ["Evidence"],
+        "type": [
+          "Evidence"
+        ],
         "name": "Alimosho Q3 reconciliation attempt",
         "description": "Solved in 2 attempts with 1 hint in 412 seconds.",
-        "reconcore:datasetHash": "sha256:4be19d8f3c2a70e61b55d94a8c3f1e209b7a6d4c8e1f0a2b3c4d5e6f7a8b9c0d",
+        "reconcore:datasetHash": "sha256:272826a68605f14587361d40627e80c9654ba1a4d98c2d46a9a6cbda5e74dc82",
         "reconcore:seed": "demo",
         "reconcore:attempts": 2,
         "reconcore:hintsUsed": 1
@@ -66,4 +79,3 @@
     "seconds_to_solve": 412
   }
 }
-

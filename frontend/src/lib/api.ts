@@ -132,7 +132,7 @@ function buildMockTutorHint(
   const parts: string[] = [];
 
   if (fieldStatus.discrepancy_ngn !== "correct") {
-    if (submittedAmount === 127500) {
+    if (submittedAmount === 201500) {
       parts.push(
         "Cash transactions stay in the physical till and never reach the bank statement."
       );
