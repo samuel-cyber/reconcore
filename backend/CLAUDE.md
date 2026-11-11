@@ -64,3 +64,23 @@ tests/
 ```bash
 uvicorn app.main:app --reload --port 8000     # from backend/
 ```
+
+## Demo answers (seed=demo)
+
+| Field | Value |
+| --- | --- |
+| `discrepancy_ngn` | `45000` |
+| `missing_tx_id` | `POS-1042` |
+| `duplicate_wb_id` | `WB-3311` |
+| decoy (same amount, settled) | `POS-1049` |
+| original waybill (not the answer) | `WB-3307` |
+| cash-included wrong total | `201500` |
+| `dataset_hash` | `sha256:272826a68605f14587361d40627e80c9654ba1a4d98c2d46a9a6cbda5e74dc82` |
+
+## Deploy
+
+Render web service, root `backend/`:
+- build: `pip install -r requirements.txt`
+- start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- env: `ISSUER_PRIVATE_KEY_B64` (so badges survive restarts), `CORS_ORIGINS`,
+  `LLM_MODEL` + provider key (optional), `DB_PATH`, `PUBLIC_BASE_URL`
