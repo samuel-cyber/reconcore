@@ -38,21 +38,31 @@ def build_hint(
         level=level, text=templates.template_text(level, status), source="template"
     )
 
-    text = _llm_hint(
+    drafted = _llm_hint(
         session=session, status=status, diagnostics=diagnostics, level=level
     )
-    if text is None:
-        return fallback
-
-    offending = leaks(text, session.ground_truth)
-    if offending is not None:
-        log.warning(
-            "tutor output blocked by the leak guard (session %s, level %s)",
+    if drafted is None:
+        log.info(
+            "hint served from the template ladder (session %s, level %s)",
             session.id,
             level,
         )
         return fallback
 
+    text, model = drafted
+    offending = leaks(text, session.ground_truth)
+    if offending is not None:
+        log.warning(
+            "tutor output from model=%s blocked by the leak guard (session %s, level %s)",
+            model,
+            session.id,
+            level,
+        )
+        return fallback
+
+    log.info(
+        "hint served from model=%s (session %s, level %s)", model, session.id, level
+    )
     return TutorHint(level=level, text=text, source="llm")
 
 
@@ -62,8 +72,8 @@ def _llm_hint(
     status: dict,
     diagnostics: Diagnostics | None,
     level: int,
-) -> str | None:
-    """Returns LLM prose, or None to use the template (no key, timeout, leak, error)."""
+) -> tuple[str, str] | None:
+    """Returns (prose, model), or None to use the template (no key, timeout, leak)."""
     try:
         from app.tutor.llm import llm_hint_text
 

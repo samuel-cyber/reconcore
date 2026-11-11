@@ -33,6 +33,17 @@ Open <http://localhost:3000/?seed=demo>. No API key is needed: with none set the
 backend serves the hand-written brief and the template hint ladder, and `/health`
 reports `{"ok":true,"llm":"fallback"}`.
 
+### The LLM, when one is configured
+
+Order is **primary → fallback → template**. The primary is Meta's Model API
+(Muse Spark) over OpenAI-compatible chat completions; `LLM_FALLBACK_MODEL`
+(e.g. Featherless) is tried only if the primary fails, and the hand-written ladder
+catches everything else. Each model gets one attempt inside `LLM_TIMEOUT_S` with no
+internal retries, `reasoning_effort` is sent explicitly and dropped for the rest of
+the process if a provider rejects it, and the leak guard runs on whichever model
+answered. `/health` reports `"llm":"up"` only after a real call to the primary
+succeeded at startup — a configured-but-broken key reads `"fallback"`.
+
 ### The demo loop
 
 1. Type a name, start the `seed=demo` scenario.
@@ -44,7 +55,7 @@ reports `{"ok":true,"llm":"fallback"}`.
 ## Tests
 
 ```bash
-cd backend && python3 -m pytest -q     # 1320 tests
+cd backend && python3 -m pytest -q     # 1335 tests
 cd frontend && npx tsc --noEmit        # frontend typecheck
 ```
 
@@ -62,9 +73,14 @@ loop end to end.
 | `CORS_ORIGINS` | yes | `https://<your-project>.vercel.app,http://localhost:3000` | Comma-separated allowed origins, no trailing slashes |
 | `PUBLIC_BASE_URL` | no | `https://reconcore-api.onrender.com` | Public URL of this API |
 | `DB_PATH` | no | `/tmp/reconcore.db` | SQLite file (default `./reconcore.db`) |
-| `LLM_MODEL` | no | `gemini/gemini-2.5-flash` | LiteLLM model string |
-| `GEMINI_API_KEY` / `OPENAI_API_KEY` | no | `…` | Provider key. Absent → template brief and template hints |
-| `LLM_TIMEOUT_S` | no | `5` | Hard deadline before falling back to a template |
+| `LLM_MODEL` | no | `openai/muse-spark-1.1` | Primary model (LiteLLM string; `openai/` = OpenAI-compatible chat completions) |
+| `LLM_API_BASE` | no | `https://api.meta.ai/v1` | Primary provider endpoint |
+| `LLM_API_KEY` | no | `…` | Meta `MODEL_API_KEY`. Absent → template brief and template hints |
+| `LLM_REASONING_EFFORT` | no | `minimal` | Sent with every call; dropped automatically if the provider rejects it |
+| `LLM_FALLBACK_MODEL` | no | `openai/<featherless model id>` | Tried only when the primary fails. Blank → straight to templates |
+| `LLM_FALLBACK_API_BASE` | no | `https://api.featherless.ai/v1` | Fallback provider endpoint |
+| `LLM_FALLBACK_API_KEY` | no | `…` | Featherless key |
+| `LLM_TIMEOUT_S` | no | `5` | Hard deadline **per model** before moving on |
 
 ### Frontend (`frontend/.env.local` locally, Vercel → Environment Variables)
 

@@ -40,11 +40,25 @@ services:
         value: /tmp/reconcore.db
 
       # --- LLM (optional) -----------------------------------------------------
+      # Primary: Meta Model API (Muse Spark), OpenAI-compatible chat completions.
       # With no key the backend serves the template brief and template hints, and
       # /health reports {"llm":"fallback"}. Nothing else changes.
       - key: LLM_MODEL
-        value: gemini/gemini-2.5-flash
+        value: openai/muse-spark-1.1
+      - key: LLM_API_BASE
+        value: https://api.meta.ai/v1
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_REASONING_EFFORT
+        value: minimal
       - key: LLM_TIMEOUT_S
         value: "5"
-      - key: GEMINI_API_KEY
+
+      # Optional second chance before the templates take over. Leave the model blank
+      # to disable the fallback entirely.
+      - key: LLM_FALLBACK_MODEL
+        value: ""
+      - key: LLM_FALLBACK_API_BASE
+        value: https://api.featherless.ai/v1
+      - key: LLM_FALLBACK_API_KEY
         sync: false

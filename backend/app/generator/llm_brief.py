@@ -18,21 +18,26 @@ MAX_WORDS = 260
 
 
 def llm_brief_body() -> str | None:
-    text = complete(
+    reply = complete(
         [
             {"role": "system", "content": BRIEF_SYSTEM},
             {"role": "user", "content": BRIEF_USER},
         ],
         max_tokens=420,
     )
-    if text is None:
+    if reply is None:
         return None
 
     body = "\n\n".join(
-        " ".join(part.split()) for part in text.strip().split("\n\n") if part.strip()
+        " ".join(part.split())
+        for part in reply.text.strip().split("\n\n")
+        if part.strip()
     )
     words = len(body.split())
     if not (MIN_WORDS <= words <= MAX_WORDS):
-        log.warning("LLM brief was %s words; keeping the template", words)
+        log.warning(
+            "brief from model=%s was %s words; keeping the template", reply.model, words
+        )
         return None
+    log.info("brief written by model=%s (%s words)", reply.model, words)
     return body

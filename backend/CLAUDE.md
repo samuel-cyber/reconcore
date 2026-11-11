@@ -41,6 +41,11 @@ Run `pytest` before finishing any task. A phase is not done until its tests pass
   "invalid_format"`, `attempt_no` unchanged.
 - Everything must still work with no LLM API key set (template brief, template hints,
   `/health` reports `"llm": "fallback"`).
+- LLM order is primary (Meta Model API / Muse Spark) -> optional fallback
+  (`LLM_FALLBACK_MODEL`, e.g. Featherless) -> hand-written template. Chat completions
+  only, `api_base`/`api_key`/`reasoning_effort` passed explicitly, `num_retries=0`,
+  one attempt per model inside `LLM_TIMEOUT_S`. The leak guard runs on whichever model
+  answered, and the model name goes to the logs, never to the API response.
 - The CSV endpoints serve the exact canonical bytes the dataset hash was computed over.
 
 ## Layout

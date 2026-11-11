@@ -80,7 +80,9 @@ def test_a_leaking_llm_hint_is_replaced_by_the_template(monkeypatch):
     import app.tutor.tutor as tutor_module
 
     monkeypatch.setattr(
-        tutor_module, "_llm_hint", lambda **_: "Just submit 45,000 for POS-1042."
+        tutor_module,
+        "_llm_hint",
+        lambda **_: ("Just submit 45,000 for POS-1042.", "openai/muse-spark-1.1"),
     )
     status = FieldStatusMap(
         discrepancy_ngn="incorrect",
@@ -99,7 +101,9 @@ def test_a_clean_llm_hint_is_kept_and_labelled_llm(monkeypatch):
     import app.tutor.tutor as tutor_module
 
     clean = "Which ledger should every bank transfer eventually appear in?"
-    monkeypatch.setattr(tutor_module, "_llm_hint", lambda **_: clean)
+    monkeypatch.setattr(
+        tutor_module, "_llm_hint", lambda **_: (clean, "openai/muse-spark-1.1")
+    )
     status = FieldStatusMap(
         discrepancy_ngn="incorrect", missing_tx_id="incorrect", duplicate_wb_id="correct"
     )

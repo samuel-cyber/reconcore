@@ -21,12 +21,16 @@ log = logging.getLogger("reconcore")
 
 
 def _prewarm_llm() -> None:
-    """Importing litellm costs a couple of seconds; pay it at boot, not on the
-    candidate's first request."""
+    """Pay the litellm import at boot rather than on the candidate's first request,
+    then probe the primary model so /health reports what actually works."""
     try:
         import litellm  # noqa: F401
     except Exception as exc:  # pragma: no cover - import problems fall back anyway
         log.warning("litellm could not be pre-imported: %s", exc)
+        return
+    from app.tutor.llm import probe_primary
+
+    probe_primary()
 
 
 @asynccontextmanager
@@ -66,7 +70,10 @@ install_error_handlers(app)
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 def health() -> HealthResponse:
-    return HealthResponse(ok=True, llm="up" if settings.llm_available else "fallback")
+    from app.tutor.llm import llm_is_up
+
+    # "up" only once a real call to the primary model has succeeded at startup.
+    return HealthResponse(ok=True, llm="up" if llm_is_up() else "fallback")
 
 
 from app.api import credential as credential_api  # noqa: E402
