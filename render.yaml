@@ -1,0 +1,50 @@
+# Render blueprint for the ReconCore backend.
+# Render -> New -> Blueprint -> point at this repo. Everything except the two secret
+# values below is set from here.
+services:
+  - type: web
+    name: reconcore-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+      # --- identity -----------------------------------------------------------
+      # Generate with:  python3 scripts/generate_issuer_key.py
+      # Set it BEFORE issuing any badge you want to verify later: changing the key
+      # changes the issuer did:key and invalidates every credential already issued.
+      - key: ISSUER_PRIVATE_KEY_B64
+        sync: false
+
+      # --- frontend origins ---------------------------------------------------
+      # Replace <your-project> with the real Vercel project name. Include every
+      # origin that will call this API; no trailing slashes.
+      - key: CORS_ORIGINS
+        value: https://<your-project>.vercel.app,http://localhost:3000
+
+      - key: PUBLIC_BASE_URL
+        value: https://reconcore-api.onrender.com
+
+      # --- storage ------------------------------------------------------------
+      # Free instances have an ephemeral filesystem; sessions live for the length of
+      # an instance. Badges still verify after a restart because verification
+      # re-derives the dataset from the credential's seed.
+      - key: DB_PATH
+        value: /tmp/reconcore.db
+
+      # --- LLM (optional) -----------------------------------------------------
+      # With no key the backend serves the template brief and template hints, and
+      # /health reports {"llm":"fallback"}. Nothing else changes.
+      - key: LLM_MODEL
+        value: gemini/gemini-2.5-flash
+      - key: LLM_TIMEOUT_S
+        value: "5"
+      - key: GEMINI_API_KEY
+        sync: false

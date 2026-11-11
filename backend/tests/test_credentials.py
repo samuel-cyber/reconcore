@@ -231,3 +231,33 @@ def test_badges_signed_before_a_restart_still_verify(badge, monkeypatch):
 
     keys_module.load_or_create_issuer_key.cache_clear()
     assert verify_credential(badge).valid is True
+
+
+def test_a_badge_still_verifies_after_the_database_is_lost(badge, monkeypatch):
+    """Render's free filesystem is ephemeral: a restart must not invalidate badges."""
+    from app.store.db import db
+
+    with db() as conn:
+        conn.execute("DELETE FROM badges")
+
+    result = verify_credential(badge)
+    assert result.hash_match is True, "seed still reproduces the dataset"
+    assert result.signature_verified is True
+    assert result.valid is True
+
+
+def test_a_hash_that_no_seed_reproduces_is_still_unknown(badge):
+    """The fallback is deterministic re-derivation, not blind trust."""
+    import copy
+
+    from app.credentials.badge import proof_hash_data, sign_credential
+
+    forged = copy.deepcopy(badge)
+    forged["evidence"][0]["reconcore:datasetHash"] = "sha256:" + "f" * 64
+    unsigned = {k: v for k, v in forged.items() if k != "proof"}
+    resigned = sign_credential(unsigned, created=datetime.now(timezone.utc))
+
+    result = verify_credential(resigned)
+    assert result.signature_verified is True
+    assert result.hash_match is False
+    assert result.reason == "hash_unknown"

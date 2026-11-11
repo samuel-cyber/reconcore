@@ -78,13 +78,19 @@ def _signature_ok(unsigned: dict, options: dict, proof_value: str) -> bool:
 
 
 def _hash_is_known(dataset_hash: str, seed: Any) -> bool:
-    """The hash must have been issued by us *and* still be reproducible from its seed."""
-    seeds = store.badge_seeds_for_hash(dataset_hash)
-    if not seeds:
-        return False
-    if isinstance(seed, str) and seed in seeds:
-        seeds = [seed]
-    for candidate in seeds:
+    """The hash must be reproducible from the seed the credential names.
+
+    Primary path (SPEC 5.6): the hash is in our `badges` table and `generate(seed)`
+    still produces it. The hosted backend runs on an ephemeral filesystem, so the
+    badges table can disappear under a restart while perfectly good credentials stay
+    in circulation. Re-deriving the dataset from the seed is the check that actually
+    carries weight — the signature already proves we issued it — so a badge whose
+    seed still reproduces its hash verifies even after the database is gone.
+    """
+    candidates = store.badge_seeds_for_hash(dataset_hash)
+    if isinstance(seed, str) and seed and seed not in candidates:
+        candidates = [*candidates, seed]
+    for candidate in candidates:
         try:
             if generate(candidate).dataset_hash == dataset_hash:
                 return True

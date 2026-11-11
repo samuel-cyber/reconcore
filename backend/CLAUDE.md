@@ -79,8 +79,13 @@ uvicorn app.main:app --reload --port 8000     # from backend/
 
 ## Deploy
 
-Render web service, root `backend/`:
-- build: `pip install -r requirements.txt`
-- start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- env: `ISSUER_PRIVATE_KEY_B64` (so badges survive restarts), `CORS_ORIGINS`,
-  `LLM_MODEL` + provider key (optional), `DB_PATH`, `PUBLIC_BASE_URL`
+See [../README.md](../README.md) for the full deploy steps and env tables, and
+[../render.yaml](../render.yaml) for the Render blueprint.
+
+- `python3 scripts/generate_issuer_key.py` prints a fresh `ISSUER_PRIVATE_KEY_B64`.
+  Set it before issuing any badge you want to verify later — a new key is a new issuer.
+- `python3 scripts/make_mocks.py` regenerates the frontend fixtures from the real
+  seed=demo dataset.
+- Hosted instances have an ephemeral filesystem, so the `badges` table can vanish on a
+  restart. Verification therefore re-derives the dataset from the credential's own seed
+  rather than depending on a database row (the signature already proves issuance).
