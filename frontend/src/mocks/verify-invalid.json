@@ -1,0 +1,9 @@
+{
+  "valid": false,
+  "signature_verified": false,
+  "hash_match": true,
+  "issuer_match": true,
+  "reason": "signature_invalid",
+  "checked_at": "2026-11-12T08:40:15Z"
+}
+

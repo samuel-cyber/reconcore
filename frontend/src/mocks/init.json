@@ -1,0 +1,104 @@
+{
+  "session_id": "ses_8f3k2m",
+  "scenario": {
+    "id": "alimosho-q3",
+    "title": "Alimosho Retail & Logistics Crisis: Q3 Reconciliation"
+  },
+  "brief": {
+    "from": "Mrs. Funke Adeyemi, Store Manager (Alimosho Branch)",
+    "body_markdown": "Welcome to the Alimosho Q3 audit desk. Before we close the October books for head office, our external auditors flagged two operational anomalies across our cashier point-of-sale logs, warehouse dispatch waybills, and GTBank settlement statement.\n\nFirst, one customer transfer logged at the till never settled into our GTBank corporate account. Remember that **Cash** and **POS Card** sales are reconciled through a separate physical till and processor ledger—they never appear in the bank transfer statement. Be careful: more than one transfer may share the same Naira value, so verify each transfer using its unique `customer_ref` inside the bank narration.\n\nSecond, a warehouse clerk accidentally logged the same stock delivery twice under two different waybill IDs, introducing a slight product-name typo and a different date format on the second entry. Report the ID of the duplicate entry, not the original.\n\ndiscrepancy_ngn = sum(POS sales paid by Transfer) − sum(bank credits). The duplicate waybill is graded only by its ID.",
+    "task_definitions": [
+      "discrepancy_ngn = sum(POS sales paid by Transfer) − sum(bank credits). The duplicate waybill is graded only by its ID.",
+      "Cash and POS Card sales never appear in the bank table — only Transfer sales settle into bank_settlement.csv.",
+      "Report the ID of the duplicate waybill entry (the second, later-listed copy with the typo), not the original."
+    ]
+  },
+  "tables": {
+    "pos": {
+      "filename": "pos_sales_log.csv",
+      "columns": [
+        "tx_id",
+        "date",
+        "cashier",
+        "product",
+        "qty",
+        "amount",
+        "payment_method",
+        "customer_ref"
+      ],
+      "rows": [
+        ["POS-1038", "12/10/2026", "Bisi A.", "Indomie-Carton-70g", "4", "₦30,000", "Transfer", "TRF-88104"],
+        ["POS-1039", "12/10/2026", "Chinedu O.", "Peak-Milk-400g", "4", "15,000", "Cash", ""],
+        ["POS-1040", "2026-10-13", "Chinedu O. ", "Golden-Penny-Semovita-10kg", "3", "36,000.00", "transfer", "TRF-88159"],
+        ["POS-1041", "Oct 13 2026", "Fatima S.", "Milo-Refill-800g", "2", "₦12,000", "POS Card", ""],
+        ["POS-1042", "14/10/2026", "Bisi A.", "Peak-Milk-400g", "12", "₦45,000", "Transfer", "TRF-88213"],
+        ["POS-1043", "2026-10-14", "Bisi A. ", "Devon-Kings-Oil-5L", "1", "15000", "Cash", ""],
+        ["POS-1044", "14/10/2026", "Fatima S.", "Indomie-Carton-70g", "2", "15,000.00", "Cash", ""],
+        ["POS-1045", "Oct 14 2026", "Fatima S.", "Devon-Kings-Oil-5L", "2", "30000", "TRANSFER", "TRF-88241"],
+        ["POS-1046", "15/10/2026", "Chinedu O.", "Golden-Penny-Semovita-10kg", "1", "₦12,000", "POS Card", ""],
+        ["POS-1047", "15/10/2026", "bisi a.", "Dangote-Sugar-50kg", "1", "₦65,000.00", "Transfer", "TRF-88267"],
+        ["POS-1048", "2026-10-15", "Fatima S. ", "Peak-Milk-400g", "6", "22,500", "Cash", ""],
+        ["POS-1049", "2026-10-15", "Chinedu O.", "Devon-Kings-Oil-5L", "3", "45,000.00", "Transfer", "TRF-88290"],
+        ["POS-1050", "16/10/2026", "Bisi A.", "Milo-Refill-800g", "3", "₦18,000", "Cash", ""],
+        ["POS-1051", "16/10/2026", "Fatima S. ", "Milo-Refill-800g", "5", "30,000", "transfer", "TRF-88312"],
+        ["POS-1052", "Oct 16 2026", "Chinedu O.", "Indomie-Carton-70g", "6", "45000", "POS Card", ""],
+        ["POS-1053", "Oct 16 2026", "Bisi A.", "Golden-Penny-Semovita-10kg", "2", "₦24,000", "Transfer", "TRF-88345"],
+        ["POS-1054", "17/10/2026", "Fatima S.", "Peak-Milk-400g", "8", "₦30,000", "Transfer", "TRF-88378"],
+        ["POS-1055", "2026-10-17", "Bisi A. ", "Milo-Refill-800g", "4", "24,000.00", "TRANSFER", "TRF-88401"],
+        ["POS-1056", "Oct 18 2026", "Chinedu O.", "Devon-Kings-Oil-5L", "1", "15000", "Transfer", "TRF-88429"]
+      ]
+    },
+    "waybills": {
+      "filename": "warehouse_waybills.csv",
+      "columns": [
+        "wb_id",
+        "date",
+        "product",
+        "qty_dispatched",
+        "destination",
+        "driver"
+      ],
+      "rows": [
+        ["WB-3301", "11/10/2026", "Indomie-Carton-70g", "40", "Alimosho Branch", "Musa K."],
+        ["WB-3302", "2026-10-11", "Golden-Penny-Semovita-10kg", "25", "Alimosho Branch ", "Tunde B."],
+        ["WB-3303", "Oct 12 2026", "Devon-Kings-Oil-5L", "18", "alimosho branch", "Musa K. "],
+        ["WB-3304", "12/10/2026", "Dangote-Sugar-50kg", "10", "Alimosho Branch", "Sani M."],
+        ["WB-3305", "2026-10-13", "Milo-Refill-800g", "30", "Alimosho Branch", "Tunde B."],
+        ["WB-3306", "13/10/2026", "Indomie-Carton-70g", "20", "ALIMOSHO BRANCH", "Musa K."],
+        ["WB-3307", "14/10/2026", "Peak-Milk-400g", "24", "Alimosho Branch", "Musa K."],
+        ["WB-3308", "Oct 14 2026", "Devon-Kings-Oil-5L", "12", "Alimosho Branch ", "Sani M. "],
+        ["WB-3309", "15/10/2026", "Golden-Penny-Semovita-10kg", "15", "Alimosho Branch", "Tunde B."],
+        ["WB-3310", "2026-10-15", "Milo-Refill-800g", "16", "alimosho branch", "Sani M."],
+        ["WB-3311", "2026-10-14", "Peak-Mlk-400g", "24", "alimosho branch ", "Musa K."],
+        ["WB-3312", "16/10/2026", "Dangote-Sugar-50kg", "8", "Alimosho Branch", "Tunde B. "],
+        ["WB-3313", "Oct 16 2026", "Indomie-Carton-70g", "35", "Alimosho Branch", "Musa K."],
+        ["WB-3314", "17/10/2026", "Peak-Milk-400g", "36", "Alimosho Branch", "Sani M."],
+        ["WB-3315", "2026-10-18", "Devon-Kings-Oil-5L", "20", "Alimosho Branch ", "Tunde B."]
+      ]
+    },
+    "bank": {
+      "filename": "bank_settlement.csv",
+      "columns": [
+        "bank_ref",
+        "value_date",
+        "narration",
+        "credit_amount"
+      ],
+      "rows": [
+        ["GTB-551810", "12/10/2026", "NIP CR/ADEWALE STORES/TRF-88104", "30000.00"],
+        ["GTB-551844", "2026-10-13", "TRF FROM NKECHI ENT/TRF-88159", "₦36,000"],
+        ["GTB-551879", "Oct 14 2026", "NIP CR/IYABO CATERING/TRF-88241", "30,000.00"],
+        ["GTB-551902", "15/10/2026", "TRF FROM ADEBAYO BAKERY/TRF-88267", "65000"],
+        ["GTB-551918", "2026-10-15", "TRF FROM OKONKWO TRADERS/TRF-88290", "45,000.00"],
+        ["GTB-551941", "16/10/2026", "NIP CR/OLUWASEUN MART/TRF-88312", "30000.00"],
+        ["GTB-551965", "Oct 16 2026", "TRF FROM BALOGUN FOODS/TRF-88345", "24,000"],
+        ["GTB-551988", "17/10/2026", "NIP CR/KEMI SUPERSTORE/TRF-88378", "30,000.00"],
+        ["GTB-552014", "2026-10-17", "TRF FROM DANJUMA PROVISIONS/TRF-88401", "₦24,000.00"],
+        ["GTB-552039", "Oct 18 2026", "NIP CR/EZEKIEL MINI MART/TRF-88429", "15,000"]
+      ]
+    }
+  },
+  "dataset_hash": "sha256:4be19d8f3c2a70e61b55d94a8c3f1e209b7a6d4c8e1f0a2b3c4d5e6f7a8b9c0d",
+  "max_hint_level": 3
+}
+

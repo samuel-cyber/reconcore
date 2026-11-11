@@ -1,0 +1,16 @@
+{
+  "passed": false,
+  "attempt_no": 1,
+  "field_status": {
+    "discrepancy_ngn": "incorrect",
+    "missing_tx_id": "incorrect",
+    "duplicate_wb_id": "correct"
+  },
+  "tutor_hint": {
+    "level": 1,
+    "text": "Which payment methods should ever reach the bank statement? Also check whether you matched the transfer by its customer reference rather than its amount.",
+    "source": "llm"
+  },
+  "badge": null
+}
+
