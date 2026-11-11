@@ -85,10 +85,12 @@ def get_brief(seed: str) -> BriefInfo:
 
     brief = template_brief()
     try:
+        from app.generator.build import load_dataset
         from app.generator.llm_brief import llm_brief_body
+        from app.tutor.guard import leaks
 
         body = llm_brief_body()
-        if body:
+        if body and leaks(body, load_dataset(seed).ground_truth) is None:
             brief = BriefInfo(
                 **{
                     "from": sc.MANAGER_FROM,
