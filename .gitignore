@@ -1,2 +1,13 @@
 # Local Netlify folder
 .netlify
+
+# demo video: sources are committed, renders and recordings are not
+demo/out/
+demo/recordings/
+demo/audio/
+demo/video/public/clips/
+demo/video/public/audio/
+demo/video/public/fonts/
+demo/scripts/node_modules/
+demo/video/node_modules/
+*.mp4

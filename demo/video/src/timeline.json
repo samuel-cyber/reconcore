@@ -1,0 +1,214 @@
+{
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "totalFrames": 4747,
+  "totalSeconds": 158.23,
+  "scenes": [
+    {
+      "id": "s1",
+      "kind": "anim",
+      "durationInFrames": 219,
+      "audio": "audio/s1.mp3",
+      "narrationSeconds": 6.312,
+      "clip": null,
+      "captions": [
+        {
+          "text": "Forty-five thousand naira just went missing \u2014 somewhere between the till, the warehouse and the bank.",
+          "from": 0,
+          "duration": 189
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "kind": "anim",
+      "durationInFrames": 433,
+      "audio": "audio/s2.mp3",
+      "narrationSeconds": 13.44,
+      "clip": null,
+      "captions": [
+        {
+          "text": "Every year, thousands of accounting, finance and business graduates leave school with certificates that say what they studied.",
+          "from": 0,
+          "duration": 243
+        },
+        {
+          "text": "What they can't show is that they can do the work.",
+          "from": 243,
+          "duration": 96
+        },
+        {
+          "text": "And employers can't tell who can.",
+          "from": 340,
+          "duration": 64
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "kind": "anim",
+      "durationInFrames": 252,
+      "audio": "audio/s3.mp3",
+      "narrationSeconds": 7.416,
+      "clip": null,
+      "captions": [
+        {
+          "text": "This is ReconCore. Practise real business operations, and earn proof that employers can verify.",
+          "from": 0,
+          "duration": 222
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "kind": "screen",
+      "durationInFrames": 840,
+      "audio": "audio/s4.mp3",
+      "narrationSeconds": 16.248,
+      "clip": "clips/s4.mp4",
+      "captions": [
+        {
+          "text": "Each candidate gets a realistic crisis.",
+          "from": 0,
+          "duration": 85
+        },
+        {
+          "text": "A store manager in Alimosho has three messy records:",
+          "from": 85,
+          "duration": 114
+        },
+        {
+          "text": "point-of-sale logs, warehouse waybills and bank settlements.",
+          "from": 199,
+          "duration": 131
+        },
+        {
+          "text": "Mixed date formats, inconsistent amounts \u2014 just like a real back office.",
+          "from": 330,
+          "duration": 157
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "kind": "screen",
+      "durationInFrames": 796,
+      "audio": "audio/s5.mp3",
+      "narrationSeconds": 14.424,
+      "clip": "clips/s5.mp4",
+      "captions": [
+        {
+          "text": "Here's a wrong attempt. The candidate matched on amount alone and picked a transfer that was actually settled.",
+          "from": 0,
+          "duration": 222
+        },
+        {
+          "text": "The AI tutor doesn't give the answer away.",
+          "from": 222,
+          "duration": 85
+        },
+        {
+          "text": "It asks a question that sends them back to the right evidence.",
+          "from": 307,
+          "duration": 125
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "kind": "screen",
+      "durationInFrames": 600,
+      "audio": "audio/s6.mp3",
+      "narrationSeconds": 11.352,
+      "clip": "clips/s6.mp4",
+      "captions": [
+        {
+          "text": "Second attempt: forty-five thousand naira, transaction POS-1042, and the duplicate waybill WB-3311.",
+          "from": 0,
+          "duration": 274
+        },
+        {
+          "text": "All three match exactly.",
+          "from": 274,
+          "duration": 66
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "kind": "anim",
+      "durationInFrames": 517,
+      "audio": "audio/s7.mp3",
+      "narrationSeconds": 16.224,
+      "clip": null,
+      "captions": [
+        {
+          "text": "This is the core design choice.",
+          "from": 0,
+          "duration": 66
+        },
+        {
+          "text": "AI never decides whether you passed.",
+          "from": 66,
+          "duration": 76
+        },
+        {
+          "text": "It writes the scenario and coaches you.",
+          "from": 142,
+          "duration": 83
+        },
+        {
+          "text": "Deterministic code grades every answer the same way, every time \u2014 so there's no verbosity bias and nothing to prompt-inject.",
+          "from": 224,
+          "duration": 262
+        }
+      ]
+    },
+    {
+      "id": "s8",
+      "kind": "screen",
+      "durationInFrames": 900,
+      "audio": "audio/s8.mp3",
+      "narrationSeconds": 20.352,
+      "clip": "clips/s8.mp4",
+      "captions": [
+        {
+          "text": "On success, ReconCore issues an Open Badges 3.0\u2013style credential, signed with Ed25519.",
+          "from": 0,
+          "duration": 207
+        },
+        {
+          "text": "It records the exact dataset solved, the number of attempts and the hints used.",
+          "from": 207,
+          "duration": 190
+        },
+        {
+          "text": "An employer can verify it in one click.",
+          "from": 397,
+          "duration": 94
+        },
+        {
+          "text": "Change a single character, and verification fails.",
+          "from": 490,
+          "duration": 120
+        }
+      ]
+    },
+    {
+      "id": "s9",
+      "kind": "anim",
+      "durationInFrames": 190,
+      "audio": "audio/s9.mp3",
+      "narrationSeconds": 5.328,
+      "clip": null,
+      "captions": [
+        {
+          "text": "ReconCore. Practise the real work \u2014 and prove it with math.",
+          "from": 0,
+          "duration": 160
+        }
+      ]
+    }
+  ]
+}

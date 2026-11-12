@@ -1,0 +1,80 @@
+{
+  "voice": "en-NG-AbeoNeural",
+  "voicePerScene": {
+    "s1": "en-NG-AbeoNeural",
+    "s2": "en-NG-AbeoNeural",
+    "s3": "en-NG-AbeoNeural",
+    "s4": "en-NG-AbeoNeural",
+    "s5": "en-NG-AbeoNeural",
+    "s6": "en-NG-AbeoNeural",
+    "s7": "en-NG-AbeoNeural",
+    "s8": "en-NG-AbeoNeural",
+    "s9": "en-NG-AbeoNeural"
+  },
+  "scenes": [
+    {
+      "id": "s1",
+      "kind": "anim",
+      "text": "Forty-five thousand naira just went missing \u2014 somewhere between the till, the warehouse and the bank.",
+      "audio": "audio/s1.mp3",
+      "narrationSeconds": 6.312
+    },
+    {
+      "id": "s2",
+      "kind": "anim",
+      "text": "Every year, thousands of accounting, finance and business graduates leave school with certificates that say what they studied. What they can't show is that they can do the work. And employers can't tell who can.",
+      "audio": "audio/s2.mp3",
+      "narrationSeconds": 13.44
+    },
+    {
+      "id": "s3",
+      "kind": "anim",
+      "text": "This is ReconCore. Practise real business operations, and earn proof that employers can verify.",
+      "audio": "audio/s3.mp3",
+      "narrationSeconds": 7.416
+    },
+    {
+      "id": "s4",
+      "kind": "screen",
+      "text": "Each candidate gets a realistic crisis. A store manager in Alimosho has three messy records: point-of-sale logs, warehouse waybills and bank settlements. Mixed date formats, inconsistent amounts \u2014 just like a real back office.",
+      "audio": "audio/s4.mp3",
+      "narrationSeconds": 16.248
+    },
+    {
+      "id": "s5",
+      "kind": "screen",
+      "text": "Here's a wrong attempt. The candidate matched on amount alone and picked a transfer that was actually settled. The AI tutor doesn't give the answer away. It asks a question that sends them back to the right evidence.",
+      "audio": "audio/s5.mp3",
+      "narrationSeconds": 14.424
+    },
+    {
+      "id": "s6",
+      "kind": "screen",
+      "text": "Second attempt: forty-five thousand naira, transaction POS-1042, and the duplicate waybill WB-3311. All three match exactly.",
+      "audio": "audio/s6.mp3",
+      "narrationSeconds": 11.352
+    },
+    {
+      "id": "s7",
+      "kind": "anim",
+      "text": "This is the core design choice. AI never decides whether you passed. It writes the scenario and coaches you. Deterministic code grades every answer the same way, every time \u2014 so there's no verbosity bias and nothing to prompt-inject.",
+      "audio": "audio/s7.mp3",
+      "narrationSeconds": 16.224
+    },
+    {
+      "id": "s8",
+      "kind": "screen",
+      "text": "On success, ReconCore issues an Open Badges 3.0\u2013style credential, signed with Ed25519. It records the exact dataset solved, the number of attempts and the hints used. An employer can verify it in one click. Change a single character, and verification fails.",
+      "audio": "audio/s8.mp3",
+      "narrationSeconds": 20.352
+    },
+    {
+      "id": "s9",
+      "kind": "anim",
+      "text": "ReconCore. Practise the real work \u2014 and prove it with math.",
+      "audio": "audio/s9.mp3",
+      "narrationSeconds": 5.328
+    }
+  ],
+  "narrationTotalSeconds": 111.096
+}

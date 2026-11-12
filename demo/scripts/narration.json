@@ -1,0 +1,24 @@
+{
+  "voice": "en-NG-AbeoNeural",
+  "fallbackVoice": "en-GB-RyanNeural",
+  "scenes": [
+    { "id": "s1", "kind": "anim",
+      "text": "Forty-five thousand naira just went missing — somewhere between the till, the warehouse and the bank." },
+    { "id": "s2", "kind": "anim",
+      "text": "Every year, thousands of accounting, finance and business graduates leave school with certificates that say what they studied. What they can't show is that they can do the work. And employers can't tell who can." },
+    { "id": "s3", "kind": "anim",
+      "text": "This is ReconCore. Practise real business operations, and earn proof that employers can verify." },
+    { "id": "s4", "kind": "screen",
+      "text": "Each candidate gets a realistic crisis. A store manager in Alimosho has three messy records: point-of-sale logs, warehouse waybills and bank settlements. Mixed date formats, inconsistent amounts — just like a real back office." },
+    { "id": "s5", "kind": "screen",
+      "text": "Here's a wrong attempt. The candidate matched on amount alone and picked a transfer that was actually settled. The AI tutor doesn't give the answer away. It asks a question that sends them back to the right evidence." },
+    { "id": "s6", "kind": "screen",
+      "text": "Second attempt: forty-five thousand naira, transaction POS-1042, and the duplicate waybill WB-3311. All three match exactly." },
+    { "id": "s7", "kind": "anim",
+      "text": "This is the core design choice. AI never decides whether you passed. It writes the scenario and coaches you. Deterministic code grades every answer the same way, every time — so there's no verbosity bias and nothing to prompt-inject." },
+    { "id": "s8", "kind": "screen",
+      "text": "On success, ReconCore issues an Open Badges 3.0–style credential, signed with Ed25519. It records the exact dataset solved, the number of attempts and the hints used. An employer can verify it in one click. Change a single character, and verification fails." },
+    { "id": "s9", "kind": "anim",
+      "text": "ReconCore. Practise the real work — and prove it with math." }
+  ]
+}

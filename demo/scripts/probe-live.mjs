@@ -1,0 +1,18 @@
+import { chromium } from 'playwright';
+import { installApiBridge } from './bridge.mjs';
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
+const errs = [], calls = [];
+p.on('console', m => m.type() === 'error' && errs.push(m.text().slice(0, 140)));
+await installApiBridge(p, { onCall: c => calls.push(c) });
+await p.goto('https://reconcore-app.netlify.app/?seed=demo', { waitUntil: 'networkidle', timeout: 60000 });
+await p.getByRole('textbox').first().fill('Judge Adaeze');
+await p.getByRole('button', { name: 'Start simulation' }).click();
+await p.waitForTimeout(5000);
+console.log('url:', p.url());
+console.log('api:', calls.join(' | ') || '(none)');
+console.log('errors:', errs.slice(0,4).join(' | ') || '(none)');
+const txt = (await p.locator('body').innerText()).replace(/\s+/g,' ');
+console.log('page snippet:', txt.slice(0, 260));
+await p.screenshot({ path: '../recordings/probe.png' });
+await b.close();
