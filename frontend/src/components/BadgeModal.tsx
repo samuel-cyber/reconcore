@@ -24,6 +24,7 @@ export default function BadgeModal() {
     badge,
     summary,
     session,
+    elapsedSeconds,
     badgeModalOpen,
     closeBadgeModal,
     showToast,
@@ -59,7 +60,7 @@ export default function BadgeModal() {
     }
   }, [badgeModalOpen, badge]);
 
-  // Reset returnValue on close & implement mandatory closedby="any" light-dismiss fallback
+  // Reset returnValue on close & implement mandatory closedby="any" pointerdown/pointerup fallback
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -71,30 +72,42 @@ export default function BadgeModal() {
 
     dialog.addEventListener("close", handleClose);
 
-    // Fallback for browsers without native HTMLDialogElement.prototype.closedBy support
-    let handleBackdropClick: ((event: MouseEvent) => void) | null = null;
+    let handlePointerDown: ((e: PointerEvent) => void) | null = null;
+    let handlePointerUp: ((e: PointerEvent) => void) | null = null;
+
     if (
       typeof HTMLDialogElement !== "undefined" &&
       !("closedBy" in HTMLDialogElement.prototype)
     ) {
-      handleBackdropClick = (event: MouseEvent) => {
-        if (event.target !== dialog) return;
-        const rect = dialog.getBoundingClientRect();
-        const isDialogContent =
-          rect.top <= event.clientY &&
-          event.clientY <= rect.top + rect.height &&
-          rect.left <= event.clientX &&
-          event.clientX <= rect.left + rect.width;
-        if (isDialogContent) return;
-        dialog.close();
+      const outside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return (
+          e.clientX < r.left ||
+          e.clientX > r.right ||
+          e.clientY < r.top ||
+          e.clientY > r.bottom
+        );
       };
-      dialog.addEventListener("click", handleBackdropClick);
+      let pressedOutside = false;
+      handlePointerDown = (e: PointerEvent) => {
+        pressedOutside = outside(e);
+      };
+      handlePointerUp = (e: PointerEvent) => {
+        if (pressedOutside && outside(e)) {
+          dialog.close();
+        }
+      };
+      dialog.addEventListener("pointerdown", handlePointerDown);
+      dialog.addEventListener("pointerup", handlePointerUp);
     }
 
     return () => {
       dialog.removeEventListener("close", handleClose);
-      if (handleBackdropClick) {
-        dialog.removeEventListener("click", handleBackdropClick);
+      if (handlePointerDown) {
+        dialog.removeEventListener("pointerdown", handlePointerDown);
+      }
+      if (handlePointerUp) {
+        dialog.removeEventListener("pointerup", handlePointerUp);
       }
     };
   }, [closeBadgeModal]);
@@ -123,7 +136,7 @@ export default function BadgeModal() {
     summary?.attempts ?? badge.evidence?.[0]?.["reconcore:attempts"] ?? 1;
   const hintsUsed =
     summary?.hints_used ?? badge.evidence?.[0]?.["reconcore:hintsUsed"] ?? 0;
-  const secondsToSolve = summary?.seconds_to_solve ?? 0;
+  const secondsToSolve = summary?.seconds_to_solve || elapsedSeconds || 0;
 
   const handleCopyJson = async () => {
     try {
@@ -169,14 +182,15 @@ export default function BadgeModal() {
     if (isVerifyingTamper) return;
     setIsVerifyingTamper(true);
     try {
-      // Ensure the authentic verification result is also loaded so the red panel sits beside the green one
       const tamperedCopy: BadgeCredential = structuredClone(badge);
       const editedName = `${tamperedCopy.credentialSubject.name} (edited)`;
       tamperedCopy.credentialSubject.name = editedName;
       setTamperedNamePreview(editedName);
 
       const [authenticRes, tamperedRes] = await Promise.all([
-        validVerifyResult ? Promise.resolve(validVerifyResult) : verifyBadge(badge),
+        validVerifyResult
+          ? Promise.resolve(validVerifyResult)
+          : verifyBadge(badge),
         verifyBadge(tamperedCopy),
       ]);
 
@@ -201,13 +215,13 @@ export default function BadgeModal() {
     >
       {/* Modal Header */}
       <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4">
-        <div className="flex items-center gap-2.5">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-700 text-white">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-700 text-white">
             <Award className="h-5 w-5" aria-hidden="true" />
           </span>
           <div>
-            <span className="text-[11px] font-bold tracking-wider text-emerald-800 uppercase">
-              Open Badges 3.0–Structured Credential Minted
+            <span className="text-xs font-bold tracking-wider text-emerald-800 uppercase">
+              Result Modal · Verifiable Credential Minted
             </span>
             <h2 id={titleId} className="text-base font-bold text-slate-900">
               {badge.credentialSubject.achievement.name}
@@ -219,6 +233,7 @@ export default function BadgeModal() {
           <button
             type="submit"
             value="close"
+            autoFocus
             aria-label="Close credential modal"
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/70 hover:text-slate-900"
           >
@@ -227,16 +242,16 @@ export default function BadgeModal() {
         </form>
       </div>
 
-      {/* Modal Scrollable Body */}
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
+      {/* Modal Scrollable Body (24px padding = p-6) */}
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-6">
         {/* Visual Badge Card */}
-        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-5 text-white shadow-md">
+        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 text-white shadow-md">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-700/80 pb-4">
             <div>
               <div className="text-xs font-medium text-emerald-400">
                 Issued to Candidate
               </div>
-              <div className="mt-0.5 text-xl font-bold tracking-tight text-white">
+              <div className="mt-1 text-xl font-bold tracking-tight text-white">
                 {badge.credentialSubject.name}
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-300">
@@ -244,8 +259,8 @@ export default function BadgeModal() {
               </p>
             </div>
 
-            <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/60 px-3 py-2 text-right">
-              <div className="text-[10px] font-bold tracking-wider text-emerald-300 uppercase">
+            <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/60 px-4 py-2 text-right">
+              <div className="text-[11px] font-bold tracking-wider text-emerald-300 uppercase">
                 Deterministic Grade
               </div>
               <div className="font-mono text-sm font-bold text-emerald-400">
@@ -254,27 +269,25 @@ export default function BadgeModal() {
             </div>
           </div>
 
-          <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-            <div className="rounded-md bg-slate-800/90 px-3 py-2">
-              <dt className="text-[11px] text-slate-400">Issued Date</dt>
-              <dd className="mt-0.5 font-mono font-medium text-slate-100">
+          <dl className="mt-4 grid grid-cols-2 gap-4 text-xs sm:grid-cols-4">
+            <div className="rounded-md bg-slate-800/90 p-3">
+              <dt className="text-xs text-slate-400">Issued Date</dt>
+              <dd className="mt-1 font-mono font-medium text-slate-100">
                 {badge.validFrom.slice(0, 10)}
               </dd>
             </div>
-            <div className="rounded-md bg-slate-800/90 px-3 py-2">
-              <dt className="text-[11px] text-slate-400">Solve Summary</dt>
-              <dd className="mt-0.5 font-mono font-medium tabular-nums text-slate-100">
+            <div className="rounded-md bg-slate-800/90 p-3">
+              <dt className="text-xs text-slate-400">Solve Summary</dt>
+              <dd className="mt-1 font-mono font-medium tabular-nums text-slate-100">
                 {attemptsCount} {attemptsCount === 1 ? "attempt" : "attempts"} ·{" "}
                 {hintsUsed} {hintsUsed === 1 ? "hint" : "hints"}
                 {secondsToSolve > 0 ? ` · ${secondsToSolve}s` : ""}
               </dd>
             </div>
-            <div className="rounded-md bg-slate-800/90 px-3 py-2 sm:col-span-2">
-              <dt className="text-[11px] text-slate-400">
-                Dataset SHA-256 Digest
-              </dt>
+            <div className="rounded-md bg-slate-800/90 p-3 sm:col-span-2">
+              <dt className="text-xs text-slate-400">Dataset SHA-256 Digest</dt>
               <dd
-                className="mt-0.5 truncate font-mono font-medium text-slate-100"
+                className="mt-1 truncate font-mono font-medium text-slate-100"
                 title={datasetHash}
               >
                 {shortHash}
@@ -284,13 +297,13 @@ export default function BadgeModal() {
         </div>
 
         {/* Action Bar: Verify, Tamper Test, View Raw JSON, Download */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleSimulateEmployerVerify}
               disabled={isVerifyingValid}
-              className="inline-flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white shadow-2xs transition-colors hover:bg-emerald-800 disabled:opacity-60"
+              className="inline-flex min-h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-xs font-semibold text-white shadow-2xs transition-colors hover:bg-emerald-800 disabled:opacity-60"
             >
               {isVerifyingValid ? (
                 <Loader2
@@ -307,7 +320,7 @@ export default function BadgeModal() {
               type="button"
               onClick={handleTamperTest}
               disabled={isVerifyingTamper}
-              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-900 shadow-2xs transition-colors hover:bg-red-100 disabled:opacity-60"
+              className="inline-flex min-h-10 items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-2 text-xs font-semibold text-red-900 shadow-2xs transition-colors hover:bg-red-100 disabled:opacity-60"
             >
               {isVerifyingTamper ? (
                 <Loader2
@@ -326,7 +339,7 @@ export default function BadgeModal() {
               type="button"
               onClick={() => setShowRawJson((prev) => !prev)}
               aria-expanded={showRawJson}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
             >
               <Code2 className="h-4 w-4" aria-hidden="true" />
               <span>
@@ -337,7 +350,7 @@ export default function BadgeModal() {
             <button
               type="button"
               onClick={handleDownloadBadge}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
               <span>Download badge.json</span>
@@ -377,7 +390,7 @@ export default function BadgeModal() {
         {/* Raw JSON-LD Credential Inspector */}
         {showRawJson && (
           <figure className="rounded-lg border border-slate-300 bg-slate-950 text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 px-3.5 py-2">
+            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
               <figcaption
                 id={rawCodeCaptionId}
                 className="font-mono text-xs font-medium text-slate-300"
@@ -388,7 +401,7 @@ export default function BadgeModal() {
                 <button
                   type="button"
                   onClick={handleCopyJson}
-                  className="inline-flex items-center gap-1 rounded bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700"
+                  className="inline-flex items-center gap-1 rounded bg-slate-800 px-3 py-1 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700"
                 >
                   {copied ? (
                     <>
@@ -411,7 +424,7 @@ export default function BadgeModal() {
               role="region"
               aria-labelledby={rawCodeCaptionId}
               tabIndex={0}
-              className="max-h-64 overflow-auto p-3.5 font-mono text-xs leading-relaxed text-slate-200"
+              className="max-h-64 overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-200"
             >
               <code>{rawJsonString}</code>
             </pre>
@@ -420,9 +433,9 @@ export default function BadgeModal() {
       </div>
 
       {/* Modal Footer */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3 text-xs text-slate-600">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 bg-slate-50 px-6 py-4 text-xs text-slate-600">
         <span className="font-mono">Issuer: {badge.issuer.id.slice(0, 32)}…</span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <Link
             href="/verify"
             onClick={closeBadgeModal}
@@ -435,7 +448,7 @@ export default function BadgeModal() {
             <button
               type="submit"
               value="done"
-              className="rounded-md bg-slate-900 px-3.5 py-1.5 font-semibold text-white hover:bg-slate-800"
+              className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white hover:bg-slate-800"
             >
               Done
             </button>
@@ -445,4 +458,3 @@ export default function BadgeModal() {
     </dialog>
   );
 }
-

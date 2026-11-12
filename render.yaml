@@ -27,7 +27,7 @@ services:
       # Replace <your-project> with the real Vercel project name. Include every
       # origin that will call this API; no trailing slashes.
       - key: CORS_ORIGINS
-        value: https://<your-project>.vercel.app,http://localhost:3000
+        value: https://reconcore-app.netlify.app,https://<your-project>.vercel.app,http://localhost:3000
 
       - key: PUBLIC_BASE_URL
         value: https://reconcore-api.onrender.com

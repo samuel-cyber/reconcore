@@ -5,6 +5,12 @@ import {
   formatCanonicalCsv,
 } from "../../../../../lib/csv-utils";
 
+export const dynamic = "force-static";
+
+export function generateStaticParams() {
+  return [{ sessionId: initFixture.session_id }];
+}
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ sessionId: string }> }

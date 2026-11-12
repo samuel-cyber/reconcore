@@ -144,6 +144,14 @@
   }
 }
 
+/* Prevent floating dev indicators/portals from overlapping footer links */
+nextjs-portal,
+[data-nextjs-toast],
+[data-nextjs-dialog-overlay] {
+  display: none !important;
+  pointer-events: none !important;
+}
+
 /* MANDATORY dialog scroll-containment rules from modern-web-guidance (dialog) */
 dialog:modal {
   overscroll-behavior: contain;
@@ -152,7 +160,7 @@ dialog:modal {
 dialog::backdrop {
   overflow: hidden;
   overscroll-behavior: contain;
-  background-color: rgba(15, 23, 42, 0.65);
+  background-color: rgba(15, 23, 42, 0.55);
   backdrop-filter: blur(2px);
 }
 
@@ -169,13 +177,50 @@ dialog::backdrop {
   white-space: nowrap !important;
 }
 
-/* Responsive table wrapper from modern-web-guidance (responsive-table & css-layout) */
+/* Responsive table wrapper with visible horizontal scroll (responsive-table) */
 .table-wrapper {
-  overflow: auto;
+  overflow-x: scroll;
+  overflow-y: auto;
   max-inline-size: 100%;
   container-type: inline-size;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
+  scrollbar-width: auto;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+
+.table-wrapper::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 4px;
+  border: 2px solid #f1f5f9;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+
+/* Slide-over dialog styles for TutorDrawer (navigation-drawer & dialog) */
+dialog.tutor-slideover {
+  inset: 0 0 0 auto;
+  margin: 0;
+  padding: 0;
+  height: 100svh;
+  max-height: 100svh;
+  width: min(26rem, 92dvw);
+  max-width: none;
+  border: 0;
+  border-inline-start: 1px solid #cbd5e1;
+  background: #ffffff;
 }
 
 :where(a:any-link, button, input, textarea, [tabindex="0"]):focus-visible {

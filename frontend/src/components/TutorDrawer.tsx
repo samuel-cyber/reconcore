@@ -1,15 +1,16 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useId, useRef } from "react";
 import {
   AlertCircle,
+  ArrowRight,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   CircleDashed,
   GraduationCap,
+  Loader2,
   ShieldAlert,
   Sparkles,
+  X,
 } from "lucide-react";
 import type { FieldStatus } from "@/lib/api-types";
 import { useSession } from "@/lib/session-context";
@@ -32,7 +33,7 @@ function FieldStatusChip({
 }) {
   if (status === "correct") {
     return (
-      <div className="flex items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50/90 px-2.5 py-1.5 text-xs">
+      <div className="flex items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50/90 px-4 py-2 text-xs">
         <span className="font-medium text-emerald-950">{label}</span>
         <span className="inline-flex items-center gap-1 font-semibold text-emerald-800">
           <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -44,7 +45,7 @@ function FieldStatusChip({
 
   if (status === "incorrect" || status === "invalid_format") {
     return (
-      <div className="flex items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50/90 px-2.5 py-1.5 text-xs">
+      <div className="flex items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50/90 px-4 py-2 text-xs">
         <span className="font-medium text-red-950">{label}</span>
         <span className="inline-flex items-center gap-1 font-semibold text-red-800">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -55,7 +56,7 @@ function FieldStatusChip({
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs">
+    <div className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-xs">
       <span className="font-medium text-slate-700">{label}</span>
       <span className="inline-flex items-center gap-1 text-slate-400">
         <CircleDashed className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -65,6 +66,189 @@ function FieldStatusChip({
   );
 }
 
+/**
+ * Hints Tab Panel: Keeps full history of hints inside the Left Pane's "Hints" tab.
+ * Includes Loading, Empty, and Error states.
+ */
+export function HintsHistoryPanel() {
+  const {
+    session,
+    attempts,
+    isSubmittingAttempt,
+    submissionError,
+    setActiveWorkspaceTab,
+    setTutorSheetOpen,
+  } = useSession();
+
+  const failedAttemptsWithHints = attempts.filter(
+    (attempt) => !attempt.passed && attempt.tutor_hint !== null
+  );
+
+  const maxHintLevel = session?.max_hint_level ?? 3;
+
+  return (
+    <section
+      aria-labelledby="hints-history-heading"
+      className="flex flex-col gap-4"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-4">
+        <div>
+          <h2
+            id="hints-history-heading"
+            className="text-sm font-bold text-slate-900"
+          >
+            Socratic Hints History
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Progressive coaching feed · Up to {maxHintLevel} hint levels
+          </p>
+        </div>
+        <span className="rounded-md bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold text-slate-700">
+          {failedAttemptsWithHints.length}{" "}
+          {failedAttemptsWithHints.length === 1 ? "hint" : "hints"}
+        </span>
+      </div>
+
+      {/* Loading State */}
+      {isSubmittingAttempt && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs font-medium text-slate-700"
+        >
+          <Loader2
+            className="h-4 w-4 shrink-0 animate-spin text-slate-900"
+            aria-hidden="true"
+          />
+          <span>Generating Socratic coaching hint…</span>
+        </div>
+      )}
+
+      {/* Error State */}
+      {submissionError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-4 text-xs text-red-900"
+        >
+          <AlertCircle
+            className="mt-0.5 h-4 w-4 shrink-0 text-red-700"
+            aria-hidden="true"
+          />
+          <div>
+            <p className="font-semibold">Hint Request Error</p>
+            <p className="mt-1">{submissionError}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!isSubmittingAttempt && failedAttemptsWithHints.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+          <GraduationCap
+            className="h-8 w-8 text-slate-400"
+            aria-hidden="true"
+          />
+          <div>
+            <p className="text-sm font-bold text-slate-800">
+              No hints recorded yet
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              Submit your findings in the Answer tab. After a failed attempt,
+              the Socratic Tutor opens as a slide-over and saves every hint here
+              for reference.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveWorkspaceTab("answer")}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            <span>Go to Answer Form</span>
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      ) : (
+        <ol className="flex flex-col gap-4" aria-live="polite">
+          {failedAttemptsWithHints.map((item, idx) => {
+            const hint = item.tutor_hint!;
+            const isTemplate = hint.source === "template";
+            return (
+              <li
+                key={`hint-history-${item.attempt_no}-${idx}`}
+                className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-4 shadow-2xs"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded bg-slate-900 px-2 py-0.5 font-mono text-xs font-semibold text-white">
+                      <Sparkles className="h-3 w-3" aria-hidden="true" />
+                      Hint Level {hint.level}
+                    </span>
+                    <span className="font-mono text-xs text-slate-500">
+                      Attempt #{item.attempt_no}
+                    </span>
+                  </div>
+                  {isTemplate && (
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      offline hint
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-sm leading-relaxed text-slate-800">
+                  {hint.text}
+                </p>
+
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  {FIELD_LABELS.map((f) => {
+                    const st = item.field_status[f.key];
+                    return (
+                      <span
+                        key={f.key}
+                        className={`rounded px-2 py-0.5 font-mono text-[11px] font-medium ${
+                          st === "correct"
+                            ? "bg-emerald-50 text-emerald-800"
+                            : "bg-red-50 text-red-800"
+                        }`}
+                      >
+                        {f.label}: {st === "correct" ? "✓" : "✗"}
+                      </span>
+                    );
+                  })}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      {failedAttemptsWithHints.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setTutorSheetOpen(true)}
+          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+        >
+          <GraduationCap className="h-4 w-4" aria-hidden="true" />
+          <span>Reopen Tutor Slide-Over</span>
+        </button>
+      )}
+
+      {/* Guardrail note */}
+      <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
+        <ShieldAlert
+          className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
+          aria-hidden="true"
+        />
+        <span>
+          AI never grades: the Socratic Tutor never reveals ground-truth values
+          and never grades your submission.
+        </span>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Tutor Slide-Over: Opens as a modal slide-over drawer from the right after a failed attempt.
+ */
 export default function TutorDrawer() {
   const {
     session,
@@ -72,199 +256,227 @@ export default function TutorDrawer() {
     latestFieldStatus,
     tutorSheetOpen,
     setTutorSheetOpen,
+    setActiveWorkspaceTab,
   } = useSession();
+
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const titleId = useId();
+
+  // Sync open/close state with native <dialog>.showModal()
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (tutorSheetOpen && session) {
+      if (!dialog.open) {
+        dialog.showModal();
+      }
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [tutorSheetOpen, session]);
+
+  // Reset returnValue on close & implement closedby="any" pointerdown/pointerup fallback
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const handleClose = () => {
+      dialog.returnValue = "";
+      setTutorSheetOpen(false);
+    };
+
+    dialog.addEventListener("close", handleClose);
+
+    let handlePointerDown: ((e: PointerEvent) => void) | null = null;
+    let handlePointerUp: ((e: PointerEvent) => void) | null = null;
+
+    if (
+      typeof HTMLDialogElement !== "undefined" &&
+      !("closedBy" in HTMLDialogElement.prototype)
+    ) {
+      const outside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return (
+          e.clientX < r.left ||
+          e.clientX > r.right ||
+          e.clientY < r.top ||
+          e.clientY > r.bottom
+        );
+      };
+      let pressedOutside = false;
+      handlePointerDown = (e: PointerEvent) => {
+        pressedOutside = outside(e);
+      };
+      handlePointerUp = (e: PointerEvent) => {
+        if (pressedOutside && outside(e)) {
+          dialog.close();
+        }
+      };
+      dialog.addEventListener("pointerdown", handlePointerDown);
+      dialog.addEventListener("pointerup", handlePointerUp);
+    }
+
+    return () => {
+      dialog.removeEventListener("close", handleClose);
+      if (handlePointerDown) {
+        dialog.removeEventListener("pointerdown", handlePointerDown);
+      }
+      if (handlePointerUp) {
+        dialog.removeEventListener("pointerup", handlePointerUp);
+      }
+    };
+  }, [setTutorSheetOpen]);
 
   if (!session) return null;
 
-  // Hints newest first (attempts array is already ordered newest-first)
   const failedAttemptsWithHints = attempts.filter(
     (attempt) => !attempt.passed && attempt.tutor_hint !== null
   );
-
+  const latestHintAttempt = failedAttemptsWithHints[0] ?? null;
   const totalAttempts = attempts.length > 0 ? attempts[0].attempt_no : 0;
   const maxHintLevel = session.max_hint_level ?? 3;
 
-  const drawerBody = (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Attempt & Hint Counter Bar */}
-      <div className="grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3">
-        <div className="rounded-md border border-slate-200/90 bg-slate-50 px-2.5 py-2">
-          <div className="text-[11px] font-medium text-slate-500 uppercase">
-            Attempts
-          </div>
-          <div className="mt-0.5 font-mono text-base font-bold tabular-nums text-slate-900">
-            {totalAttempts}
+  const handleReviseAnswer = () => {
+    setTutorSheetOpen(false);
+    setActiveWorkspaceTab("answer");
+  };
+
+  const handleViewHintHistory = () => {
+    setTutorSheetOpen(false);
+    setActiveWorkspaceTab("hints");
+  };
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      {...({ closedby: "any" } as React.DialogHTMLAttributes<HTMLDialogElement>)}
+      className="tutor-slideover shadow-2xl open:flex open:flex-col"
+    >
+      {/* Slide-Over Header */}
+      <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-900 px-6 py-4 text-white">
+        <div className="flex items-center gap-2">
+          <GraduationCap className="h-5 w-5 text-amber-400" aria-hidden="true" />
+          <div>
+            <span className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase">
+              Attempt #{totalAttempts} Feedback
+            </span>
+            <h2 id={titleId} className="text-base font-bold text-white">
+              Socratic Tutor Coaching
+            </h2>
           </div>
         </div>
-        <div className="rounded-md border border-slate-200/90 bg-slate-50 px-2.5 py-2">
-          <div className="text-[11px] font-medium text-slate-500 uppercase">
-            Hint Level
-          </div>
-          <div className="mt-0.5 font-mono text-base font-bold tabular-nums text-slate-900">
-            {failedAttemptsWithHints.length > 0
-              ? `${failedAttemptsWithHints[0].tutor_hint?.level ?? 1} / ${maxHintLevel}`
-              : `0 / ${maxHintLevel}`}
-          </div>
-        </div>
+
+        <form method="dialog">
+          <button
+            type="submit"
+            value="close"
+            autoFocus
+            aria-label="Close Socratic Tutor slide-over"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </form>
       </div>
 
-      {/* Field Status Chips */}
-      <div className="border-b border-slate-200 bg-slate-50/70 p-3">
-        <h3 className="mb-2 text-[11px] font-bold tracking-wider text-slate-600 uppercase">
-          Field Verification Status
-        </h3>
-        <div className="flex flex-col gap-1.5">
-          {FIELD_LABELS.map((field) => (
-            <FieldStatusChip
-              key={field.key}
-              label={field.label}
-              status={latestFieldStatus?.[field.key]}
-            />
-          ))}
+      {/* Slide-Over Scrollable Body (24px padding, 16px gaps) */}
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-6">
+        {/* Attempt & Hint Counter Bar */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-medium text-slate-500 uppercase">
+              Attempts
+            </div>
+            <div className="mt-1 font-mono text-lg font-bold tabular-nums text-slate-900">
+              {totalAttempts}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-medium text-slate-500 uppercase">
+              Hint Level
+            </div>
+            <div className="mt-1 font-mono text-lg font-bold tabular-nums text-slate-900">
+              {latestHintAttempt
+                ? `${latestHintAttempt.tutor_hint?.level ?? 1} / ${maxHintLevel}`
+                : `0 / ${maxHintLevel}`}
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Hints Feed (Newest First) */}
-      <div
-        className="min-h-0 flex-1 overflow-y-auto p-3"
-        aria-live="polite"
-        aria-relevant="additions"
-      >
-        <div className="mb-2.5 flex items-center justify-between">
-          <h3 className="text-[11px] font-bold tracking-wider text-slate-600 uppercase">
-            Socratic Coaching Feed
+        {/* Field Verification Status */}
+        <div className="flex flex-col gap-2">
+          <h3 className="text-xs font-bold tracking-wider text-slate-600 uppercase">
+            Field Verification Breakdown
           </h3>
-          <span className="text-[11px] text-slate-400">Newest first</span>
+          <div className="flex flex-col gap-2">
+            {FIELD_LABELS.map((field) => (
+              <FieldStatusChip
+                key={field.key}
+                label={field.label}
+                status={latestFieldStatus?.[field.key]}
+              />
+            ))}
+          </div>
         </div>
 
-        {/* Rule: Never show a hint before the first failed attempt */}
-        {failedAttemptsWithHints.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-center">
-            <GraduationCap
-              className="mx-auto h-7 w-7 text-slate-400"
-              aria-hidden="true"
-            />
-            <p className="mt-2 text-xs font-semibold text-slate-700">
-              No hints issued yet
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              Inspect the three source tables and submit your reconciliation. If
-              any field is off, the Socratic Tutor will guide you here without
-              spoiling the answer.
+        {/* Latest Hint Card */}
+        {latestHintAttempt && latestHintAttempt.tutor_hint ? (
+          <div className="flex flex-col gap-4 rounded-xl border border-amber-300 bg-amber-50/70 p-6 shadow-2xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded bg-slate-900 px-2.5 py-1 font-mono text-xs font-semibold text-white">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                Hint Level {latestHintAttempt.tutor_hint.level}
+              </span>
+              <span className="font-mono text-xs text-slate-600">
+                Attempt #{latestHintAttempt.attempt_no}
+              </span>
+            </div>
+
+            <p className="text-sm leading-relaxed font-medium text-slate-900">
+              {latestHintAttempt.tutor_hint.text}
             </p>
           </div>
         ) : (
-          <ol className="space-y-2.5">
-            {failedAttemptsWithHints.map((item) => {
-              const hint = item.tutor_hint!;
-              const isTemplate = hint.source === "template";
-              return (
-                <li
-                  key={`attempt-${item.attempt_no}`}
-                  className="rounded-lg border border-slate-200 bg-white p-3 shadow-2xs"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-100 pb-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="inline-flex items-center gap-1 rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-white">
-                        <Sparkles className="h-3 w-3" aria-hidden="true" />
-                        Hint Level {hint.level}
-                      </span>
-                      <span className="font-mono text-[11px] text-slate-500">
-                        Attempt #{item.attempt_no}
-                      </span>
-                    </div>
-
-                    {isTemplate && (
-                      <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                        offline hint
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="mt-2 text-sm leading-relaxed text-slate-800">
-                    {hint.text}
-                  </p>
-                </li>
-              );
-            })}
-          </ol>
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500">
+            No coaching hint available yet.
+          </div>
         )}
 
-        {/* Guardrail note */}
-        <div className="mt-4 flex items-start gap-2 rounded-md border border-slate-200/80 bg-slate-100/80 p-2.5 text-[11px] leading-relaxed text-slate-600">
+        {/* Guardrail Note */}
+        <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
           <ShieldAlert
-            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500"
+            className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
             aria-hidden="true"
           />
           <span>
-            Leak-guarded Socratic AI: the tutor never reveals the ground-truth
-            Naira amount or transaction IDs, and never grades your attempt.
+            AI never grades: deterministic Python code checks your exact figures
+            and locks verified fields. This hint is also saved in your{" "}
+            <strong className="font-semibold text-slate-800">Hints</strong> tab.
           </span>
         </div>
       </div>
-    </div>
-  );
 
-  return (
-    <>
-      {/* Desktop (>= 1280px) Static Right Column */}
-      <aside
-        aria-label="Socratic AI Tutor"
-        className="hidden h-full min-h-0 flex-col border-l border-slate-200 bg-slate-50/60 xl:flex"
-      >
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100/80 px-3.5 py-2.5">
-          <div className="flex items-center gap-2">
-            <GraduationCap
-              className="h-4 w-4 text-slate-800"
-              aria-hidden="true"
-            />
-            <h2 className="text-xs font-bold tracking-wider text-slate-900 uppercase">
-              Socratic Tutor
-            </h2>
-          </div>
-          {failedAttemptsWithHints.length > 0 && (
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-900">
-              {failedAttemptsWithHints.length}{" "}
-              {failedAttemptsWithHints.length === 1 ? "hint" : "hints"}
-            </span>
-          )}
-        </div>
-        {drawerBody}
-      </aside>
-
-      {/* Narrower screens (< 1280px) Bottom Sheet */}
-      <aside
-        aria-label="Socratic AI Tutor Bottom Sheet"
-        className="fixed inset-x-0 bottom-0 z-30 flex flex-col border-t border-slate-300 bg-slate-50 shadow-xl xl:hidden"
-      >
+      {/* Slide-Over Footer Actions */}
+      <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 p-6">
         <button
           type="button"
-          onClick={() => setTutorSheetOpen(!tutorSheetOpen)}
-          aria-expanded={tutorSheetOpen}
-          className="flex w-full items-center justify-between bg-slate-900 px-4 py-2.5 text-left text-xs font-semibold text-white"
+          onClick={handleReviseAnswer}
+          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
         >
-          <span className="inline-flex items-center gap-2">
-            <GraduationCap className="h-4 w-4" aria-hidden="true" />
-            <span>
-              Socratic Tutor (Attempts: {totalAttempts} · Hints:{" "}
-              {failedAttemptsWithHints.length})
-            </span>
-          </span>
-          <span className="inline-flex items-center gap-1 text-slate-300">
-            <span>{tutorSheetOpen ? "Hide" : "Expand"}</span>
-            {tutorSheetOpen ? (
-              <ChevronDown className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <ChevronUp className="h-4 w-4" aria-hidden="true" />
-            )}
-          </span>
+          <span>Revise Answer</span>
+          <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </button>
 
-        {tutorSheetOpen && (
-          <div className="max-h-[55dvh] overflow-y-auto">{drawerBody}</div>
-        )}
-      </aside>
-    </>
+        <button
+          type="button"
+          onClick={handleViewHintHistory}
+          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+        >
+          <span>View All Hints in Hints Tab ({failedAttemptsWithHints.length})</span>
+        </button>
+      </div>
+    </dialog>
   );
 }
-

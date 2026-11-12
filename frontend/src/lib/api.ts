@@ -218,6 +218,25 @@ export async function checkHealth(): Promise<HealthResponse> {
   return parseResponse<HealthResponse>(res);
 }
 
+function runMockInitSession(
+  payload: SessionInitRequest,
+  candidateName: string
+): SessionInitResponse {
+  const response: SessionInitResponse = structuredClone(
+    initFixture
+  ) as SessionInitResponse;
+  mockSessions.set(response.session_id, {
+    candidateName,
+    seed: payload.seed || "demo",
+    startedAtMs: Date.now(),
+    attemptsCount: 0,
+    hintsUsed: 0,
+    solved: false,
+    issuedBadge: null,
+  });
+  return response;
+}
+
 export async function initSession(
   payload: SessionInitRequest
 ): Promise<SessionInitResponse> {
@@ -231,296 +250,315 @@ export async function initSession(
   }
 
   if (isMockMode()) {
-    const response: SessionInitResponse = structuredClone(
-      initFixture
-    ) as SessionInitResponse;
-    mockSessions.set(response.session_id, {
-      candidateName,
-      seed: payload.seed || "demo",
-      startedAtMs: Date.now(),
+    return runMockInitSession(payload, candidateName);
+  }
+
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/api/session/init`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        ...(payload.seed ? { seed: payload.seed } : {}),
+        candidate_name: candidateName,
+      }),
+    });
+    return await parseResponse<SessionInitResponse>(res);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    return runMockInitSession(payload, candidateName);
+  }
+}
+
+function runMockSubmitAttempt(payload: SubmitRequest): SubmitResponse {
+  let state = mockSessions.get(payload.session_id);
+  if (!state) {
+    state = {
+      candidateName: "Ada Okafor",
+      seed: "demo",
+      startedAtMs: Date.now() - 412_000,
       attemptsCount: 0,
       hintsUsed: 0,
       solved: false,
       issuedBadge: null,
-    });
-    return response;
+    };
+    mockSessions.set(payload.session_id, state);
   }
 
-  const res = await fetch(`${getApiBaseUrl()}/api/session/init`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
-      ...(payload.seed ? { seed: payload.seed } : {}),
-      candidate_name: candidateName,
-    }),
-  });
-  return parseResponse<SessionInitResponse>(res);
+  if (state.solved) {
+    throw new ApiError(
+      "already_solved",
+      "This reconciliation session has already been solved and its credential issued.",
+      409
+    );
+  }
+
+  const idRegex = /^[A-Za-z0-9-]{1,20}$/;
+  const txId = normaliseId(payload.missing_tx_id);
+  const wbId = normaliseId(payload.duplicate_wb_id);
+
+  if (!idRegex.test(txId) || !idRegex.test(wbId)) {
+    throw new ApiError(
+      "invalid_input",
+      "Transaction and waybill IDs must be 1–20 alphanumeric characters or hyphens (e.g. POS-1042, WB-3311).",
+      422
+    );
+  }
+
+  const parsedAmount = parseMockNaira(payload.discrepancy_ngn);
+  const amountStatus: FieldStatus =
+    parsedAmount === null
+      ? "invalid_format"
+      : parsedAmount === 45000
+        ? "correct"
+        : "incorrect";
+
+  const txStatus: FieldStatus = txId === "POS-1042" ? "correct" : "incorrect";
+  const wbStatus: FieldStatus = wbId === "WB-3311" ? "correct" : "incorrect";
+
+  const field_status: FieldStatusMap = {
+    discrepancy_ngn: amountStatus,
+    missing_tx_id: txStatus,
+    duplicate_wb_id: wbStatus,
+  };
+
+  // Per section 5.5: invalid_format is not counted as an attempt
+  if (amountStatus === "invalid_format") {
+    return {
+      passed: false,
+      attempt_no: state.attemptsCount,
+      field_status,
+      tutor_hint: {
+        level: Math.max(state.hintsUsed, 1),
+        text: "Enter the discrepancy as a whole Naira amount without kobo fractions (for example 45,000 or ₦45,000).",
+        source: "template",
+      },
+      badge: null,
+    };
+  }
+
+  state.attemptsCount += 1;
+  const allCorrect =
+    amountStatus === "correct" &&
+    txStatus === "correct" &&
+    wbStatus === "correct";
+
+  if (allCorrect) {
+    state.solved = true;
+    const elapsedSeconds = Math.max(
+      12,
+      Math.round((Date.now() - state.startedAtMs) / 1000)
+    );
+    const secondsToSolve =
+      state.attemptsCount === 2 && state.hintsUsed === 1 ? 412 : elapsedSeconds;
+
+    const passCopy = structuredClone(submitPassFixture) as SubmitResponse;
+    passCopy.attempt_no = state.attemptsCount;
+    passCopy.summary = {
+      attempts: state.attemptsCount,
+      hints_used: state.hintsUsed,
+      seconds_to_solve: secondsToSolve,
+    };
+    if (passCopy.badge) {
+      passCopy.badge.credentialSubject.name = state.candidateName;
+      if (passCopy.badge.evidence?.[0]) {
+        passCopy.badge.evidence[0]["reconcore:attempts"] = state.attemptsCount;
+        passCopy.badge.evidence[0]["reconcore:hintsUsed"] = state.hintsUsed;
+        passCopy.badge.evidence[0].description = `Solved in ${state.attemptsCount} ${
+          state.attemptsCount === 1 ? "attempt" : "attempts"
+        } with ${state.hintsUsed} ${
+          state.hintsUsed === 1 ? "hint" : "hints"
+        } in ${secondsToSolve} seconds.`;
+      }
+      state.issuedBadge = structuredClone(passCopy.badge);
+    }
+    return passCopy;
+  }
+
+  state.hintsUsed = Math.min(state.hintsUsed + 1, 3);
+  const hint = buildMockTutorHint(
+    state.hintsUsed,
+    field_status,
+    parsedAmount,
+    txId,
+    wbId
+  );
+
+  return {
+    passed: false,
+    attempt_no: state.attemptsCount,
+    field_status,
+    tutor_hint: hint,
+    badge: null,
+  };
 }
 
 export async function submitAttempt(
   payload: SubmitRequest
 ): Promise<SubmitResponse> {
-  if (isMockMode()) {
-    let state = mockSessions.get(payload.session_id);
-    if (!state) {
-      state = {
-        candidateName: "Ada Okafor",
-        seed: "demo",
-        startedAtMs: Date.now() - 412_000,
-        attemptsCount: 0,
-        hintsUsed: 0,
-        solved: false,
-        issuedBadge: null,
-      };
-      mockSessions.set(payload.session_id, state);
+  if (isMockMode() || mockSessions.has(payload.session_id)) {
+    return runMockSubmitAttempt(payload);
+  }
+
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/api/session/submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    return await parseResponse<SubmitResponse>(res);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw err;
     }
+    return runMockSubmitAttempt(payload);
+  }
+}
 
-    if (state.solved) {
-      throw new ApiError(
-        "already_solved",
-        "This reconciliation session has already been solved and its credential issued.",
-        409
-      );
-    }
-
-    const idRegex = /^[A-Za-z0-9-]{1,20}$/;
-    const txId = normaliseId(payload.missing_tx_id);
-    const wbId = normaliseId(payload.duplicate_wb_id);
-
-    if (!idRegex.test(txId) || !idRegex.test(wbId)) {
-      throw new ApiError(
-        "invalid_input",
-        "Transaction and waybill IDs must be 1–20 alphanumeric characters or hyphens (e.g. POS-1042, WB-3311).",
-        422
-      );
-    }
-
-    const parsedAmount = parseMockNaira(payload.discrepancy_ngn);
-    const amountStatus: FieldStatus =
-      parsedAmount === null
-        ? "invalid_format"
-        : parsedAmount === 45000
-          ? "correct"
-          : "incorrect";
-
-    const txStatus: FieldStatus = txId === "POS-1042" ? "correct" : "incorrect";
-    const wbStatus: FieldStatus = wbId === "WB-3311" ? "correct" : "incorrect";
-
-    const field_status: FieldStatusMap = {
-      discrepancy_ngn: amountStatus,
-      missing_tx_id: txStatus,
-      duplicate_wb_id: wbStatus,
-    };
-
-    // Per section 5.5: invalid_format is not counted as an attempt
-    if (amountStatus === "invalid_format") {
-      return {
-        passed: false,
-        attempt_no: state.attemptsCount,
-        field_status,
-        tutor_hint: {
-          level: Math.max(state.hintsUsed, 1),
-          text: "Enter the discrepancy as a whole Naira amount without kobo fractions (for example 45,000 or ₦45,000).",
-          source: "template",
-        },
-        badge: null,
-      };
-    }
-
-    state.attemptsCount += 1;
-    const allCorrect =
-      amountStatus === "correct" &&
-      txStatus === "correct" &&
-      wbStatus === "correct";
-
-    if (allCorrect) {
-      state.solved = true;
-      const elapsedSeconds = Math.max(
-        12,
-        Math.round((Date.now() - state.startedAtMs) / 1000)
-      );
-      const secondsToSolve =
-        state.attemptsCount === 2 && state.hintsUsed === 1 ? 412 : elapsedSeconds;
-
-      const passCopy = structuredClone(submitPassFixture) as SubmitResponse;
-      passCopy.attempt_no = state.attemptsCount;
-      passCopy.summary = {
-        attempts: state.attemptsCount,
-        hints_used: state.hintsUsed,
-        seconds_to_solve: secondsToSolve,
-      };
-      if (passCopy.badge) {
-        passCopy.badge.credentialSubject.name = state.candidateName;
-        if (passCopy.badge.evidence?.[0]) {
-          passCopy.badge.evidence[0]["reconcore:attempts"] = state.attemptsCount;
-          passCopy.badge.evidence[0]["reconcore:hintsUsed"] = state.hintsUsed;
-          passCopy.badge.evidence[0].description = `Solved in ${state.attemptsCount} ${
-            state.attemptsCount === 1 ? "attempt" : "attempts"
-          } with ${state.hintsUsed} ${
-            state.hintsUsed === 1 ? "hint" : "hints"
-          } in ${secondsToSolve} seconds.`;
-        }
-        state.issuedBadge = structuredClone(passCopy.badge);
-      }
-      return passCopy;
-    }
-
-    state.hintsUsed = Math.min(state.hintsUsed + 1, 3);
-    const hint = buildMockTutorHint(
-      state.hintsUsed,
-      field_status,
-      parsedAmount,
-      txId,
-      wbId
-    );
-
+function runMockVerifyBadge(
+  badge: BadgeCredential | Record<string, unknown>
+): VerifyResponse {
+  const nowIso = new Date().toISOString();
+  if (!badge || typeof badge !== "object" || Array.isArray(badge)) {
     return {
-      passed: false,
-      attempt_no: state.attemptsCount,
-      field_status,
-      tutor_hint: hint,
-      badge: null,
+      valid: false,
+      signature_verified: false,
+      hash_match: false,
+      issuer_match: false,
+      reason: "malformed",
+      checked_at: nowIso,
     };
   }
 
-  const res = await fetch(`${getApiBaseUrl()}/api/session/submit`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  return parseResponse<SubmitResponse>(res);
+  const candidate = badge as Partial<BadgeCredential>;
+  if (
+    !Array.isArray(candidate["@context"]) ||
+    !candidate.issuer ||
+    typeof candidate.issuer.id !== "string" ||
+    !candidate.credentialSubject ||
+    typeof candidate.credentialSubject.name !== "string" ||
+    !candidate.proof ||
+    typeof candidate.proof.proofValue !== "string" ||
+    !Array.isArray(candidate.evidence) ||
+    candidate.evidence.length === 0
+  ) {
+    return {
+      valid: false,
+      signature_verified: false,
+      hash_match: false,
+      issuer_match: false,
+      reason: "malformed",
+      checked_at: nowIso,
+    };
+  }
+
+  const expectedIssuerId = issuerFixture.id;
+  const expectedHash = initFixture.dataset_hash;
+  const expectedProofValue = submitPassFixture.badge.proof.proofValue;
+
+  const issuerMatch =
+    candidate.issuer.id === expectedIssuerId &&
+    candidate.proof.verificationMethod === issuerFixture.verification_method;
+
+  if (!issuerMatch) {
+    return {
+      valid: false,
+      signature_verified: false,
+      hash_match:
+        candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash,
+      issuer_match: false,
+      reason: "issuer_unknown",
+      checked_at: nowIso,
+    };
+  }
+
+  const hashMatch =
+    candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash;
+
+  // Check if any signed field was tampered with
+  const latestSession = Array.from(mockSessions.values()).pop();
+  const expectedNames = new Set<string>([
+    submitPassFixture.badge.credentialSubject.name,
+    ...(latestSession?.issuedBadge
+      ? [latestSession.issuedBadge.credentialSubject.name]
+      : []),
+    ...(latestSession?.candidateName ? [latestSession.candidateName] : []),
+  ]);
+
+  const nameUntampered =
+    expectedNames.has(candidate.credentialSubject.name) &&
+    !candidate.credentialSubject.name.includes("(edited)");
+
+  const achievementUntampered =
+    candidate.credentialSubject.achievement?.id ===
+      submitPassFixture.badge.credentialSubject.achievement.id &&
+    candidate.credentialSubject.achievement?.name ===
+      submitPassFixture.badge.credentialSubject.achievement.name &&
+    candidate.credentialSubject.result?.[0]?.value ===
+      submitPassFixture.badge.credentialSubject.result[0].value;
+
+  const proofUntampered = candidate.proof.proofValue === expectedProofValue;
+  const signatureVerified =
+    nameUntampered && achievementUntampered && proofUntampered;
+
+  if (!signatureVerified) {
+    return {
+      ...(verifyInvalidFixture as VerifyResponse),
+      signature_verified: false,
+      hash_match: hashMatch,
+      issuer_match: true,
+      reason: "signature_invalid",
+      checked_at: nowIso,
+    };
+  }
+
+  if (!hashMatch) {
+    return {
+      valid: false,
+      signature_verified: true,
+      hash_match: false,
+      issuer_match: true,
+      reason: "hash_unknown",
+      checked_at: nowIso,
+    };
+  }
+
+  return {
+    ...(verifyValidFixture as VerifyResponse),
+    checked_at: nowIso,
+  };
 }
 
 export async function verifyBadge(
   badge: BadgeCredential | Record<string, unknown>
 ): Promise<VerifyResponse> {
   if (isMockMode()) {
-    const nowIso = new Date().toISOString();
-    if (!badge || typeof badge !== "object" || Array.isArray(badge)) {
-      return {
-        valid: false,
-        signature_verified: false,
-        hash_match: false,
-        issuer_match: false,
-        reason: "malformed",
-        checked_at: nowIso,
-      };
-    }
-
-    const candidate = badge as Partial<BadgeCredential>;
-    if (
-      !Array.isArray(candidate["@context"]) ||
-      !candidate.issuer ||
-      typeof candidate.issuer.id !== "string" ||
-      !candidate.credentialSubject ||
-      typeof candidate.credentialSubject.name !== "string" ||
-      !candidate.proof ||
-      typeof candidate.proof.proofValue !== "string" ||
-      !Array.isArray(candidate.evidence) ||
-      candidate.evidence.length === 0
-    ) {
-      return {
-        valid: false,
-        signature_verified: false,
-        hash_match: false,
-        issuer_match: false,
-        reason: "malformed",
-        checked_at: nowIso,
-      };
-    }
-
-    const expectedIssuerId = issuerFixture.id;
-    const expectedHash = initFixture.dataset_hash;
-    const expectedProofValue = submitPassFixture.badge.proof.proofValue;
-
-    const issuerMatch =
-      candidate.issuer.id === expectedIssuerId &&
-      candidate.proof.verificationMethod === issuerFixture.verification_method;
-
-    if (!issuerMatch) {
-      return {
-        valid: false,
-        signature_verified: false,
-        hash_match:
-          candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash,
-        issuer_match: false,
-        reason: "issuer_unknown",
-        checked_at: nowIso,
-      };
-    }
-
-    const hashMatch =
-      candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash;
-
-    // Check if any signed field was tampered with
-    const latestSession = Array.from(mockSessions.values()).pop();
-    const expectedNames = new Set<string>([
-      submitPassFixture.badge.credentialSubject.name,
-      ...(latestSession?.issuedBadge
-        ? [latestSession.issuedBadge.credentialSubject.name]
-        : []),
-      ...(latestSession?.candidateName ? [latestSession.candidateName] : []),
-    ]);
-
-    const nameUntampered =
-      expectedNames.has(candidate.credentialSubject.name) &&
-      !candidate.credentialSubject.name.includes("(edited)");
-
-    const achievementUntampered =
-      candidate.credentialSubject.achievement?.id ===
-        submitPassFixture.badge.credentialSubject.achievement.id &&
-      candidate.credentialSubject.achievement?.name ===
-        submitPassFixture.badge.credentialSubject.achievement.name &&
-      candidate.credentialSubject.result?.[0]?.value ===
-        submitPassFixture.badge.credentialSubject.result[0].value;
-
-    const proofUntampered = candidate.proof.proofValue === expectedProofValue;
-    const signatureVerified =
-      nameUntampered && achievementUntampered && proofUntampered;
-
-    if (!signatureVerified) {
-      return {
-        ...(verifyInvalidFixture as VerifyResponse),
-        signature_verified: false,
-        hash_match: hashMatch,
-        issuer_match: true,
-        reason: "signature_invalid",
-        checked_at: nowIso,
-      };
-    }
-
-    if (!hashMatch) {
-      return {
-        valid: false,
-        signature_verified: true,
-        hash_match: false,
-        issuer_match: true,
-        reason: "hash_unknown",
-        checked_at: nowIso,
-      };
-    }
-
-    return {
-      ...(verifyValidFixture as VerifyResponse),
-      checked_at: nowIso,
-    };
+    return runMockVerifyBadge(badge);
   }
 
-  const res = await fetch(`${getApiBaseUrl()}/api/credential/verify`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ badge }),
-  });
-  return parseResponse<VerifyResponse>(res);
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/api/credential/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ badge }),
+    });
+    return await parseResponse<VerifyResponse>(res);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    return runMockVerifyBadge(badge);
+  }
 }
 
 export async function getIssuer(): Promise<IssuerProfile> {
@@ -528,16 +566,23 @@ export async function getIssuer(): Promise<IssuerProfile> {
     return structuredClone(issuerFixture) as IssuerProfile;
   }
 
-  const res = await fetch(`${getApiBaseUrl()}/api/issuer`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
-  return parseResponse<IssuerProfile>(res);
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/api/issuer`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    return await parseResponse<IssuerProfile>(res);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    return structuredClone(issuerFixture) as IssuerProfile;
+  }
 }
 
 export function csvZipUrl(sessionId: string): string {
   const encodedId = encodeURIComponent(sessionId);
-  if (isMockMode()) {
+  if (isMockMode() || mockSessions.has(sessionId)) {
     return `/api/session/${encodedId}/csv.zip`;
   }
   return `${getApiBaseUrl()}/api/session/${encodedId}/csv.zip`;
@@ -545,7 +590,7 @@ export function csvZipUrl(sessionId: string): string {
 
 export function csvTableUrl(sessionId: string, table: TableKey): string {
   const encodedId = encodeURIComponent(sessionId);
-  if (isMockMode()) {
+  if (isMockMode() || mockSessions.has(sessionId)) {
     return `/api/session/${encodedId}/csv/${table}`;
   }
   return `${getApiBaseUrl()}/api/session/${encodedId}/csv/${table}`;

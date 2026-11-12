@@ -3,6 +3,16 @@ import initFixture from "../../../../../../mocks/init.json";
 import { formatCanonicalCsv } from "../../../../../../lib/csv-utils";
 import type { TableKey } from "../../../../../../lib/api-types";
 
+export const dynamic = "force-static";
+
+export function generateStaticParams() {
+  return [
+    { sessionId: initFixture.session_id, table: "pos" },
+    { sessionId: initFixture.session_id, table: "waybills" },
+    { sessionId: initFixture.session_id, table: "bank" },
+  ];
+}
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ sessionId: string; table: string }> }

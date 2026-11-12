@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     issuer_name: str = "ReconCore"
 
     db_path: str = "./reconcore.db"
-    cors_origins: str = "http://localhost:3000,https://reconcore.vercel.app"
+    cors_origins: str = "http://localhost:3000,https://reconcore-app.netlify.app,https://reconcore.vercel.app"
     public_base_url: str = "http://localhost:8000"
 
     @property
