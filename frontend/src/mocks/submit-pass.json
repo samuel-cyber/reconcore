@@ -18,7 +18,7 @@
       "OpenBadgeCredential"
     ],
     "issuer": {
-      "id": "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH",
+      "id": "did:key:z6MkeVxRCF6JPJx5Hn4oiHGYKfS9gW7K6ADekkf2T1KGJBsL",
       "type": [
         "Profile"
       ],
@@ -68,9 +68,9 @@
       "type": "DataIntegrityProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-11-12T08:40:11Z",
-      "verificationMethod": "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH#z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH",
+      "verificationMethod": "did:key:z6MkeVxRCF6JPJx5Hn4oiHGYKfS9gW7K6ADekkf2T1KGJBsL#z6MkeVxRCF6JPJx5Hn4oiHGYKfS9gW7K6ADekkf2T1KGJBsL",
       "proofPurpose": "assertionMethod",
-      "proofValue": "z3y8X9kLmN2pQrS4tUvW6xYz1aBcDeFgHiJkLmNoPqRsTuVwXyZ2aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789"
+      "proofValue": "z3vuJddgvfv1tDcTJHxiukQS9wkNh59UBQnDeKZKUoDFFiGoEsVbwAeGKpJXNP7XDUzgNyjv1Cao8wKdew3tsV8F4"
     }
   },
   "summary": {

@@ -1,7 +1,6 @@
 {
-  "id": "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH",
+  "id": "did:key:z6MkeVxRCF6JPJx5Hn4oiHGYKfS9gW7K6ADekkf2T1KGJBsL",
   "name": "ReconCore",
-  "public_key_multibase": "z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH",
-  "verification_method": "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH#z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH"
+  "public_key_multibase": "z6MkeVxRCF6JPJx5Hn4oiHGYKfS9gW7K6ADekkf2T1KGJBsL",
+  "verification_method": "did:key:z6MkeVxRCF6JPJx5Hn4oiHGYKfS9gW7K6ADekkf2T1KGJBsL#z6MkeVxRCF6JPJx5Hn4oiHGYKfS9gW7K6ADekkf2T1KGJBsL"
 }
-

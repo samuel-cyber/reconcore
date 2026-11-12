@@ -17,9 +17,14 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
+from datetime import datetime, timezone  # noqa: E402
+
+from app.credentials.badge import build_unsigned_credential, sign_credential  # noqa: E402
+from app.credentials.did import issuer_profile  # noqa: E402
 from app.generator import scenario as sc  # noqa: E402
 from app.generator.brief import template_brief  # noqa: E402
 from app.generator.build import generate  # noqa: E402
+from app.schemas import SolveSummary  # noqa: E402
 
 MOCKS = BACKEND.parent / "frontend" / "src" / "mocks"
 # The fixture keeps a stable, recognisable session id.
@@ -52,13 +57,32 @@ def main() -> None:
     init_path.write_text(json.dumps(build_init(), indent=2, ensure_ascii=False) + "\n")
     print(f"wrote {init_path.relative_to(BACKEND.parent)}")
 
-    # Keep the pass fixture bound to the same dataset, so mock-mode verification's
-    # hash check still matches.
+    # Keep the pass fixture and issuer fixture bound to the real dataset hash and
+    # signed by the current issuer key so standalone /verify sample buttons work
+    # in both mock mode and live backend mode.
+    issued_at = datetime(2026, 11, 12, 8, 40, 11, tzinfo=timezone.utc)
+    summary = SolveSummary(attempts=2, hints_used=1, seconds_to_solve=412)
+    unsigned = build_unsigned_credential(
+        candidate_name="Ada Okafor",
+        seed="demo",
+        dataset_hash=dataset.dataset_hash,
+        summary=summary,
+        issued_at=issued_at,
+        credential_id="urn:uuid:7c1e9b40-8a2d-4f19-9c3b-2d6e8f1a4b90",
+    )
+    signed_badge = sign_credential(unsigned, created=issued_at)
+
     pass_path = MOCKS / "submit-pass.json"
     payload = json.loads(pass_path.read_text())
-    payload["badge"]["evidence"][0]["reconcore:datasetHash"] = dataset.dataset_hash
+    payload["badge"] = signed_badge
     pass_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     print(f"wrote {pass_path.relative_to(BACKEND.parent)}")
+
+    issuer_path = MOCKS / "issuer.json"
+    issuer_path.write_text(
+        json.dumps(issuer_profile().model_dump(), indent=2, ensure_ascii=False) + "\n"
+    )
+    print(f"wrote {issuer_path.relative_to(BACKEND.parent)}")
 
     truth = dataset.ground_truth
     print(
