@@ -6,8 +6,4 @@
 [build.environment]
   NODE_VERSION = "20"
   NEXT_PUBLIC_USE_MOCKS = "false"
-
-
-
-
-
+  NEXT_PUBLIC_API_URL = "https://reconcore-api.onrender.com"
