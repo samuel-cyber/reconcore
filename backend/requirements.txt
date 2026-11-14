@@ -2,6 +2,6 @@ fastapi
 uvicorn[standard]
 pydantic>=2
 pydantic-settings
-litellm
+httpx
 cryptography
 base58

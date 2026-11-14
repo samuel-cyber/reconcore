@@ -1,4 +1,4 @@
-"""LiteLLM calls for the tutor and the brief (SPEC 5.7).
+"""LLM calls for the tutor and the brief (SPEC 5.7).
 
 Provider order is primary -> optional fallback -> hand-written template. Every call is
 a plain chat completion (never the Responses API) with `api_base`, `api_key` and
@@ -40,6 +40,53 @@ _last_reason: str = "no call made yet"
 
 class EmptyReply(RuntimeError):
     """The provider answered but the message had no text (usually a starved budget)."""
+
+
+class ProviderError(RuntimeError):
+    """The provider returned an HTTP error. The message carries status and body."""
+
+
+def _wire_model(model: str) -> str:
+    """`openai/muse-spark-1.1` -> `muse-spark-1.1`. The prefix only ever said which wire
+    format to speak; providers expect the bare model id."""
+    return model.split("/", 1)[1] if model.startswith("openai/") else model
+
+
+def chat_completion(
+    *,
+    model: str,
+    messages: list[dict],
+    api_base: str | None,
+    api_key: str,
+    timeout: float,
+    max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
+    **_unused,
+) -> dict:
+    """One OpenAI-compatible chat-completions request, sent directly with httpx.
+
+    This is byte-for-byte the request a plain curl sends:
+    POST {api_base}/chat/completions with {"model", "messages", ...}. We call providers
+    directly rather than through a client library so there is no layer that can
+    rewrite the model id, the endpoint or the parameters.
+    """
+    import httpx
+
+    body: dict = {"model": _wire_model(model), "messages": messages}
+    if max_tokens:
+        body["max_tokens"] = max_tokens
+    if reasoning_effort:
+        body["reasoning_effort"] = reasoning_effort
+    url = (api_base or "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
+    response = httpx.post(
+        url,
+        json=body,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=timeout,
+    )
+    if response.status_code >= 400:
+        raise ProviderError(f"HTTP {response.status_code}: {response.text[:300]}")
+    return response.json()
 
 
 def _scrub(text: object) -> str:
@@ -109,8 +156,6 @@ def _call_once(
     timeout: float | None = None,
 ) -> str:
     """One request. Raises on provider failure and on an empty reply."""
-    import litellm
-
     settings = get_settings()
     deadline = timeout if timeout is not None else settings.llm_timeout_s
     kwargs = {
@@ -120,8 +165,7 @@ def _call_once(
         "api_key": target.api_key,
         "timeout": deadline,
         "request_timeout": deadline,
-        # LiteLLM retries internally by default, which blows straight through our
-        # deadline. One attempt per model, then the next target.
+        # One attempt per model, then the next target. Never retried internally.
         "num_retries": 0,
     }
     # No cap unless one is configured: reasoning tokens count against it.
@@ -130,7 +174,7 @@ def _call_once(
     if with_effort and settings.llm_reasoning_effort:
         kwargs["reasoning_effort"] = settings.llm_reasoning_effort
 
-    response = litellm.completion(**kwargs)
+    response = chat_completion(**kwargs)
     choice = response["choices"][0]
     text = choice["message"]["content"]
     if not (isinstance(text, str) and text.strip()):

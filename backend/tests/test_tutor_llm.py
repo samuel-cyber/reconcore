@@ -95,9 +95,7 @@ def fake_completion(behaviour, calls):
 
 
 def install(monkeypatch, behaviour, calls):
-    import litellm
-
-    monkeypatch.setattr(litellm, "completion", fake_completion(behaviour, calls))
+    monkeypatch.setattr(llm_module, "chat_completion", fake_completion(behaviour, calls))
 
 
 # ------------------------------------------------------------------ no keys at all
@@ -534,3 +532,46 @@ def test_the_failure_reason_names_the_model_that_was_sent(primary, monkeypatch, 
     reason = client.get("/health").json()["llm_reason"]
     assert "muse-spark-1.1" in reason and "api.meta.ai" in reason
     assert "meta-test-key" not in reason
+
+
+# ------------------------------------------------------------- the wire request
+
+
+def test_the_wire_request_matches_a_plain_curl(primary, monkeypatch):
+    """Exactly what the presenter's working curl sent: bare model id, chat endpoint."""
+    import httpx
+
+    sent: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Which table?"}, "finish_reason": "stop"}]}
+
+    def fake_post(url, json, headers, timeout):
+        sent.update(url=url, json=json, headers=headers, timeout=timeout)
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    hint = build_hint(session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1)
+
+    assert hint.source == "llm"
+    assert sent["url"] == "https://api.meta.ai/v1/chat/completions"
+    assert sent["json"]["model"] == "muse-spark-1.1"
+    assert sent["json"]["reasoning_effort"] == "minimal"
+    assert "max_tokens" not in sent["json"] and "temperature" not in sent["json"]
+    assert sent["headers"]["Authorization"] == "Bearer meta-test-key"
+
+
+def test_an_http_error_becomes_a_readable_reason(primary, monkeypatch, client):
+    import httpx
+
+    class FakeResponse:
+        status_code = 404
+        text = '{"error":{"message":"The requested model was not found."}}'
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: FakeResponse())
+    assert llm_module.probe_primary() is False
+    reason = client.get("/health").json()["llm_reason"]
+    assert "HTTP 404" in reason and "not found" in reason

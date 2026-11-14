@@ -21,18 +21,11 @@ log = logging.getLogger("reconcore")
 
 
 def _prewarm_llm() -> None:
-    """Pay the litellm import at boot rather than on the candidate's first request,
-    then probe the primary model so /health reports what actually works."""
-    try:
-        import litellm  # noqa: F401
-    except Exception as exc:  # pragma: no cover - import problems fall back anyway
-        log.warning("litellm could not be pre-imported: %s", exc)
-        return
+    """Probe the primary model at boot so /health reports what actually works, then
+    write the manager's message off the request path."""
     from app.tutor.llm import probe_primary
 
     if probe_primary():
-        # Write the manager's message now, off the request path, so the first
-        # candidate's /init is instant.
         from app.generator.brief import prewarm_llm_brief
 
         prewarm_llm_brief()

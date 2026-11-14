@@ -1,0 +1,191 @@
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 467bbfb..75ef8bc 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -21,18 +21,11 @@ log = logging.getLogger("reconcore")
+ 
+ 
+ def _prewarm_llm() -> None:
+-    """Pay the litellm import at boot rather than on the candidate's first request,
+-    then probe the primary model so /health reports what actually works."""
+-    try:
+-        import litellm  # noqa: F401
+-    except Exception as exc:  # pragma: no cover - import problems fall back anyway
+-        log.warning("litellm could not be pre-imported: %s", exc)
+-        return
++    """Probe the primary model at boot so /health reports what actually works, then
++    write the manager's message off the request path."""
+     from app.tutor.llm import probe_primary
+ 
+     if probe_primary():
+-        # Write the manager's message now, off the request path, so the first
+-        # candidate's /init is instant.
+         from app.generator.brief import prewarm_llm_brief
+ 
+         prewarm_llm_brief()
+diff --git a/backend/app/tutor/llm.py b/backend/app/tutor/llm.py
+index 99c7cd5..6227fc5 100644
+--- a/backend/app/tutor/llm.py
++++ b/backend/app/tutor/llm.py
+@@ -1,4 +1,4 @@
+-"""LiteLLM calls for the tutor and the brief (SPEC 5.7).
++"""LLM calls for the tutor and the brief (SPEC 5.7).
+ 
+ Provider order is primary -> optional fallback -> hand-written template. Every call is
+ a plain chat completion (never the Responses API) with `api_base`, `api_key` and
+@@ -42,6 +42,53 @@ class EmptyReply(RuntimeError):
+     """The provider answered but the message had no text (usually a starved budget)."""
+ 
+ 
++class ProviderError(RuntimeError):
++    """The provider returned an HTTP error. The message carries status and body."""
++
++
++def _wire_model(model: str) -> str:
++    """`openai/muse-spark-1.1` -> `muse-spark-1.1`. The prefix only ever said which wire
++    format to speak; providers expect the bare model id."""
++    return model.split("/", 1)[1] if model.startswith("openai/") else model
++
++
++def chat_completion(
++    *,
++    model: str,
++    messages: list[dict],
++    api_base: str | None,
++    api_key: str,
++    timeout: float,
++    max_tokens: int | None = None,
++    reasoning_effort: str | None = None,
++    **_unused,
++) -> dict:
++    """One OpenAI-compatible chat-completions request, sent directly with httpx.
++
++    This is byte-for-byte the request a plain curl sends:
++    POST {api_base}/chat/completions with {"model", "messages", ...}. We call providers
++    directly rather than through a client library so there is no layer that can
++    rewrite the model id, the endpoint or the parameters.
++    """
++    import httpx
++
++    body: dict = {"model": _wire_model(model), "messages": messages}
++    if max_tokens:
++        body["max_tokens"] = max_tokens
++    if reasoning_effort:
++        body["reasoning_effort"] = reasoning_effort
++    url = (api_base or "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
++    response = httpx.post(
++        url,
++        json=body,
++        headers={"Authorization": f"Bearer {api_key}"},
++        timeout=timeout,
++    )
++    if response.status_code >= 400:
++        raise ProviderError(f"HTTP {response.status_code}: {response.text[:300]}")
++    return response.json()
++
++
+ def _scrub(text: object) -> str:
+     """An error message that is safe to log and to show in /health: no keys, one line."""
+     settings = get_settings()
+@@ -109,8 +156,6 @@ def _call_once(
+     timeout: float | None = None,
+ ) -> str:
+     """One request. Raises on provider failure and on an empty reply."""
+-    import litellm
+-
+     settings = get_settings()
+     deadline = timeout if timeout is not None else settings.llm_timeout_s
+     kwargs = {
+@@ -120,8 +165,7 @@ def _call_once(
+         "api_key": target.api_key,
+         "timeout": deadline,
+         "request_timeout": deadline,
+-        # LiteLLM retries internally by default, which blows straight through our
+-        # deadline. One attempt per model, then the next target.
++        # One attempt per model, then the next target. Never retried internally.
+         "num_retries": 0,
+     }
+     # No cap unless one is configured: reasoning tokens count against it.
+@@ -130,7 +174,7 @@ def _call_once(
+     if with_effort and settings.llm_reasoning_effort:
+         kwargs["reasoning_effort"] = settings.llm_reasoning_effort
+ 
+-    response = litellm.completion(**kwargs)
++    response = chat_completion(**kwargs)
+     choice = response["choices"][0]
+     text = choice["message"]["content"]
+     if not (isinstance(text, str) and text.strip()):
+diff --git a/backend/requirements.txt b/backend/requirements.txt
+index ec24f06..ae1b237 100644
+--- a/backend/requirements.txt
++++ b/backend/requirements.txt
+@@ -2,6 +2,6 @@ fastapi
+ uvicorn[standard]
+ pydantic>=2
+ pydantic-settings
+-litellm
++httpx
+ cryptography
+ base58
+diff --git a/backend/tests/test_tutor_llm.py b/backend/tests/test_tutor_llm.py
+index 9251ff8..7b2fef6 100644
+--- a/backend/tests/test_tutor_llm.py
++++ b/backend/tests/test_tutor_llm.py
+@@ -95,9 +95,7 @@ def fake_completion(behaviour, calls):
+ 
+ 
+ def install(monkeypatch, behaviour, calls):
+-    import litellm
+-
+-    monkeypatch.setattr(litellm, "completion", fake_completion(behaviour, calls))
++    monkeypatch.setattr(llm_module, "chat_completion", fake_completion(behaviour, calls))
+ 
+ 
+ # ------------------------------------------------------------------ no keys at all
+@@ -534,3 +532,46 @@ def test_the_failure_reason_names_the_model_that_was_sent(primary, monkeypatch,
+     reason = client.get("/health").json()["llm_reason"]
+     assert "muse-spark-1.1" in reason and "api.meta.ai" in reason
+     assert "meta-test-key" not in reason
++
++
++# ------------------------------------------------------------- the wire request
++
++
++def test_the_wire_request_matches_a_plain_curl(primary, monkeypatch):
++    """Exactly what the presenter's working curl sent: bare model id, chat endpoint."""
++    import httpx
++
++    sent: dict = {}
++
++    class FakeResponse:
++        status_code = 200
++
++        def json(self):
++            return {"choices": [{"message": {"content": "Which table?"}, "finish_reason": "stop"}]}
++
++    def fake_post(url, json, headers, timeout):
++        sent.update(url=url, json=json, headers=headers, timeout=timeout)
++        return FakeResponse()
++
++    monkeypatch.setattr(httpx, "post", fake_post)
++    hint = build_hint(session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1)
++
++    assert hint.source == "llm"
++    assert sent["url"] == "https://api.meta.ai/v1/chat/completions"
++    assert sent["json"]["model"] == "muse-spark-1.1"
++    assert sent["json"]["reasoning_effort"] == "minimal"
++    assert "max_tokens" not in sent["json"] and "temperature" not in sent["json"]
++    assert sent["headers"]["Authorization"] == "Bearer meta-test-key"
++
++
++def test_an_http_error_becomes_a_readable_reason(primary, monkeypatch, client):
++    import httpx
++
++    class FakeResponse:
++        status_code = 404
++        text = '{"error":{"message":"The requested model was not found."}}'
++
++    monkeypatch.setattr(httpx, "post", lambda *a, **k: FakeResponse())
++    assert llm_module.probe_primary() is False
++    reason = client.get("/health").json()["llm_reason"]
++    assert "HTTP 404" in reason and "not found" in reason
