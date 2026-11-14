@@ -121,3 +121,67 @@ def test_hints_only_address_incorrect_fields():
     )
     text = templates.template_text(1, status.model_dump())
     assert text == templates.LADDER[1]["missing_tx_id"]
+
+
+# ------------------------------------------------------------ diagnostic openers
+
+
+def test_diagnostic_openers_are_safe_for_every_seed():
+    """Fixed text again: no amount, no ID, for any dataset."""
+    from app.generator.build import generate
+
+    for i in range(200):
+        truth = generate(f"seed-{i}").ground_truth
+        for text in templates.DIAGNOSTIC_HINTS.values():
+            assert is_safe(text, truth), text
+    for text in templates.DIAGNOSTIC_HINTS.values():
+        assert is_safe(text, TRUTH)
+        assert not any(ch.isdigit() for ch in text)
+
+
+def test_a_recognised_mistake_gets_its_own_template_hint():
+    """The offline tutor still speaks to the mistake the grader recognised."""
+    from app.grading.grade import grade
+
+    result = grade(
+        truth=TRUTH,
+        discrepancy_ngn=TRUTH.discrepancy_ngn + TRUTH.cash_total_ngn,
+        missing_tx_id=TRUTH.decoy_tx_id,
+        duplicate_wb_id=TRUTH.duplicate_wb_id,
+    )
+    hint = build_hint(
+        session=_session(),
+        field_status=FieldStatusMap(**result.field_status),
+        diagnostics=result.diagnostics,
+        attempt_no=1,
+    )
+    assert hint.source == "template"
+    assert templates.DIAGNOSTIC_HINTS["included_cash"] in hint.text
+    assert templates.DIAGNOSTIC_HINTS["hit_decoy"] in hint.text
+    assert is_safe(hint.text, TRUTH)
+
+    original = grade(
+        truth=TRUTH,
+        discrepancy_ngn=TRUTH.discrepancy_ngn,
+        missing_tx_id=TRUTH.missing_tx_id,
+        duplicate_wb_id=TRUTH.original_wb_id,
+    )
+    text = templates.template_text(
+        1, original.field_status, original.diagnostics
+    )
+    assert text == templates.DIAGNOSTIC_HINTS["picked_original_waybill"]
+
+
+def test_an_unrecognised_mistake_still_uses_the_ladder():
+    from app.grading.grade import grade
+
+    result = grade(
+        truth=TRUTH,
+        discrepancy_ngn=TRUTH.discrepancy_ngn + 1,
+        missing_tx_id="POS-0000",
+        duplicate_wb_id=TRUTH.duplicate_wb_id,
+    )
+    text = templates.template_text(2, result.field_status, result.diagnostics)
+    assert text == " ".join(
+        [templates.LADDER[2]["discrepancy_ngn"], templates.LADDER[2]["missing_tx_id"]]
+    )

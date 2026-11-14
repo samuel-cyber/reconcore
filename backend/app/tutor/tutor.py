@@ -35,7 +35,9 @@ def build_hint(
         )
 
     fallback = TutorHint(
-        level=level, text=templates.template_text(level, status), source="template"
+        level=level,
+        text=templates.template_text(level, status, diagnostics),
+        source="template",
     )
 
     drafted = _llm_hint(

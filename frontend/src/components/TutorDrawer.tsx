@@ -186,11 +186,9 @@ export function HintsHistoryPanel() {
                       Attempt #{item.attempt_no}
                     </span>
                   </div>
-                  {isTemplate && (
-                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                      offline hint
-                    </span>
-                  )}
+                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                    {isTemplate ? "offline hint" : "AI tutor"}
+                  </span>
                 </div>
 
                 <p className="text-sm leading-relaxed text-slate-800">
@@ -429,7 +427,12 @@ export default function TutorDrawer() {
                 <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                 Hint Level {latestHintAttempt.tutor_hint.level}
               </span>
-              <span className="font-mono text-xs text-slate-600">
+              <span className="flex items-center gap-2 font-mono text-xs text-slate-600">
+                <span className="rounded bg-white/80 px-2 py-0.5 font-sans text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+                  {latestHintAttempt.tutor_hint.source === "llm"
+                    ? "AI tutor"
+                    : "offline hint"}
+                </span>
                 Attempt #{latestHintAttempt.attempt_no}
               </span>
             </div>

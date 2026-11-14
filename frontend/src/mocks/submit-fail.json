@@ -9,8 +9,7 @@
   "tutor_hint": {
     "level": 1,
     "text": "Which payment methods should ever reach the bank statement? Also check whether you matched the transfer by its customer reference rather than its amount.",
-    "source": "llm"
+    "source": "template"
   },
   "badge": null
 }
-

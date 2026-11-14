@@ -1,0 +1,2909 @@
+diff --git a/.gitignore b/.gitignore
+index 6582234..a470c6c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,2 +1,6 @@
+ # Local Netlify folder
+ .netlify
++.DS_Store
++*.db
++*.db-shm
++*.db-wal
+diff --git a/README.md b/README.md
+index d965679..77f705d 100644
+--- a/README.md
++++ b/README.md
+@@ -41,8 +41,19 @@ Order is **primary → fallback → template**. The primary is Meta's Model API
+ catches everything else. Each model gets one attempt inside `LLM_TIMEOUT_S` with no
+ internal retries, `reasoning_effort` is sent explicitly and dropped for the rest of
+ the process if a provider rejects it, and the leak guard runs on whichever model
+-answered. `/health` reports `"llm":"up"` only after a real call to the primary
+-succeeded at startup — a configured-but-broken key reads `"fallback"`.
++answered. No `max_tokens` and no `temperature` are sent: Muse Spark is a reasoning
++model, so a small token cap is spent on thinking and the reply comes back empty.
++`/health` reports `"llm":"up"` only while the most recent real call to the primary
++succeeded; otherwise it reports `"fallback"` together with `llm_reason`, the actual
++error (never the key). The manager's brief is written by the LLM once at startup and
++reused for every seed, so `/api/session/init` never waits on a model.
++
++### Mock mode
++
++`NEXT_PUBLIC_USE_MOCKS=true` runs the UI against local fixtures for layout work. It is
++an explicit build-time switch and is never entered automatically: if the real backend
++is unreachable the UI retries while the host wakes, then shows an error. Grading and
++credential verification only ever happen on the server.
+ 
+ ### The demo loop
+ 
+@@ -80,7 +91,8 @@ loop end to end.
+ | `LLM_FALLBACK_MODEL` | no | `openai/<featherless model id>` | Tried only when the primary fails. Blank → straight to templates |
+ | `LLM_FALLBACK_API_BASE` | no | `https://api.featherless.ai/v1` | Fallback provider endpoint |
+ | `LLM_FALLBACK_API_KEY` | no | `…` | Featherless key |
+-| `LLM_TIMEOUT_S` | no | `5` | Hard deadline **per model** before moving on |
++| `LLM_TIMEOUT_S` | no | `20` | Hard deadline **per model** before moving on. Muse Spark reasons before answering; below ~15 every hint becomes a template |
++| `LLM_MAX_TOKENS` | no | `0` | `0` sends no cap. Reasoning tokens count against a cap and starve the reply |
+ 
+ ### Frontend (`frontend/.env.local` locally, Vercel → Environment Variables)
+ 
+@@ -118,7 +130,7 @@ sets everything except the two secrets. Or create a Web Service by hand:
+ Then check:
+ 
+ ```bash
+-curl https://reconcore-api.onrender.com/health      # {"ok":true,"llm":"fallback"|"up"}
++curl https://reconcore-api.onrender.com/health      # {"ok":true,"llm":"up"} or {"llm":"fallback","llm_reason":"<why>"}
+ curl https://reconcore-api.onrender.com/api/issuer  # the did:key your badges carry
+ ```
+ 
+diff --git a/backend/.env.example b/backend/.env.example
+index 8a82c3e..3953150 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -11,8 +11,12 @@ LLM_FALLBACK_MODEL=     # e.g. openai/<featherless model id>
+ LLM_FALLBACK_API_BASE=https://api.featherless.ai/v1
+ LLM_FALLBACK_API_KEY=
+ 
+-# Hard timeout in seconds, per model, before falling back.
+-LLM_TIMEOUT_S=5
++# Hard timeout in seconds, per model, before falling back. Muse Spark reasons before
++# it answers, so keep this at 15 or more.
++LLM_TIMEOUT_S=20
++# 0 = send no max_tokens (recommended for reasoning models: thinking tokens count
++# against the cap). Set a number only for a non-reasoning fallback model.
++LLM_MAX_TOKENS=0
+ 
+ # --- identity ---------------------------------------------------------------------
+ # Ed25519 issuer private key, raw 32 bytes, base64. Generate with
+diff --git a/backend/CLAUDE.md b/backend/CLAUDE.md
+index e152015..b213e24 100644
+--- a/backend/CLAUDE.md
++++ b/backend/CLAUDE.md
+@@ -94,3 +94,20 @@ See [../README.md](../README.md) for the full deploy steps and env tables, and
+ - Hosted instances have an ephemeral filesystem, so the `badges` table can vanish on a
+   restart. Verification therefore re-derives the dataset from the credential's own seed
+   rather than depending on a database row (the signature already proves issuance).
++
++## Rules added after the finale audit (do not regress)
++
++- The frontend never substitutes mock data for a real backend that is slow or down.
++  Mock mode is `NEXT_PUBLIC_USE_MOCKS=true` only. Grading and verification happen on the
++  server or not at all; a network failure is retried, then shown as an error.
++- No real answer may appear in UI copy: placeholders, helper text, error messages and
++  the landing preview image use neutral text, never demo-seed values.
++- Sessions are never created under a placeholder name. `/briefing` and `/workspace`
++  opened without a session redirect to the start screen.
++- LLM calls send no `max_tokens` (unless `LLM_MAX_TOKENS` > 0) and no `temperature`:
++  Muse Spark is a reasoning model and a small cap returns an empty reply. Keep
++  `LLM_TIMEOUT_S` at 15 or more. `/health` carries `llm_reason` when in fallback.
++- `/api/session/init` never calls a model. The LLM brief is written once at startup
++  (`prewarm_llm_brief`) and reused for every seed.
++- Template hints take the grader's diagnostics, so the offline tutor still addresses the
++  recognised mistake (cash included, decoy transfer, original waybill).
+diff --git a/backend/app/api/credential.py b/backend/app/api/credential.py
+index 9b4a3f4..338a5b7 100644
+--- a/backend/app/api/credential.py
++++ b/backend/app/api/credential.py
+@@ -2,10 +2,15 @@
+ 
+ from __future__ import annotations
+ 
++from typing import Any
++
+ from fastapi import APIRouter
+ 
++from app.credentials.badge import build_unsigned_credential, sign_credential
+ from app.credentials.verify import verify_credential
+-from app.schemas import VerifyRequest, VerifyResponse
++from app.generator.build import load_dataset
++from app.schemas import SolveSummary, VerifyRequest, VerifyResponse
++from app.store.sessions import utc_now
+ 
+ router = APIRouter(prefix="/api/credential", tags=["credential"])
+ 
+@@ -13,3 +18,26 @@ router = APIRouter(prefix="/api/credential", tags=["credential"])
+ @router.post("/verify", response_model=VerifyResponse)
+ def verify(payload: VerifyRequest) -> VerifyResponse:
+     return verify_credential(payload.badge)
++
++
++SAMPLE_CANDIDATE = "Sample Candidate (demo credential)"
++
++
++@router.get("/sample")
++def sample_credential() -> dict[str, Any]:
++    """A genuinely signed specimen for the employer verifier's "load a sample" button.
++
++    It is signed with the live issuer key over the demo dataset, so it verifies for the
++    same reasons a candidate's badge does, and editing any character of it fails. It is
++    labelled as a sample in the signed name and is not stored as an issued badge.
++    """
++    dataset = load_dataset("demo")
++    now = utc_now()
++    unsigned = build_unsigned_credential(
++        candidate_name=SAMPLE_CANDIDATE,
++        seed="demo",
++        dataset_hash=dataset.dataset_hash,
++        summary=SolveSummary(attempts=2, hints_used=1, seconds_to_solve=412),
++        issued_at=now,
++    )
++    return sign_credential(unsigned, created=now)
+diff --git a/backend/app/api/session.py b/backend/app/api/session.py
+index d60a97a..53b85a6 100644
+--- a/backend/app/api/session.py
++++ b/backend/app/api/session.py
+@@ -128,8 +128,8 @@ def submit(payload: SubmitRequest) -> SubmitResponse:
+     if not is_valid_id(tx_id) or not is_valid_id(wb_id):
+         raise ApiError(
+             "invalid_input",
+-            "Transaction and waybill IDs must be 1–20 letters, digits or hyphens "
+-            "(e.g. POS-1042, WB-3311).",
++            "Transaction and waybill IDs must be 1–20 letters, digits or hyphens, "
++            "copied exactly as they appear in the tables.",
+             422,
+         )
+ 
+diff --git a/backend/app/config.py b/backend/app/config.py
+index a4bec2a..8a24743 100644
+--- a/backend/app/config.py
++++ b/backend/app/config.py
+@@ -24,7 +24,12 @@ class Settings(BaseSettings):
+     llm_fallback_api_base: str = "https://api.featherless.ai/v1"
+     llm_fallback_api_key: str = ""
+ 
+-    llm_timeout_s: float = 5.0
++    # Muse Spark reasons before it answers, so a hint takes several seconds. Five was
++    # too tight and silently pushed every hint onto the templates.
++    llm_timeout_s: float = 20.0
++    # 0 = send no max_tokens at all. Reasoning tokens count against the cap, so a small
++    # value starves the reply; only set this for a non-reasoning fallback model.
++    llm_max_tokens: int = 0
+ 
+     issuer_private_key_b64: str = ""
+     issuer_name: str = "ReconCore"
+diff --git a/backend/app/generator/brief.py b/backend/app/generator/brief.py
+index b42ec12..23921ba 100644
+--- a/backend/app/generator/brief.py
++++ b/backend/app/generator/brief.py
+@@ -21,10 +21,13 @@ DISCREPANCY_DEFINITION = (
+     "The duplicate waybill is graded only by its ID."
+ )
+ 
++# One line per task, in the order the UI lists them (discrepancy, missing transaction,
++# duplicate waybill).
+ TASK_DEFINITIONS = [
+     DISCREPANCY_DEFINITION,
+-    "Cash and POS Card sales never appear in the bank table — only Transfer sales "
+-    "settle into bank_settlement.csv.",
++    "Report the tx_id of the Transfer sale that has no matching bank credit. Match each "
++    "transfer by its customer_ref inside the bank narration, not by its amount. Cash and "
++    "POS Card sales never appear in bank_settlement.csv.",
+     "Report the ID of the duplicate waybill entry (the second, later-listed copy with "
+     "the typo), not the original.",
+ ]
+@@ -77,20 +80,63 @@ def _cache_brief(seed: str, brief: BriefInfo) -> None:
+         )
+ 
+ 
++# The LLM-written body carries no seed-specific fact, so it is written once per process
++# (at startup, off the request path) and reused for every seed. `/api/session/init`
++# never waits on a model.
++LLM_BODY_KEY = "__llm_body__"
++
++
++def _cached_llm_body() -> str | None:
++    with db() as conn:
++        row = conn.execute(
++            "SELECT brief_json FROM brief_cache WHERE seed = ?", (LLM_BODY_KEY,)
++        ).fetchone()
++    if not row:
++        return None
++    try:
++        body = json.loads(row["brief_json"]).get("body")
++    except Exception:  # pragma: no cover - corrupt cache row
++        return None
++    return body if isinstance(body, str) and body.strip() else None
++
++
++def prewarm_llm_brief() -> bool:
++    """Ask the LLM for the manager's message once and keep it. Safe to call repeatedly;
++    returns True when an LLM-written body is available afterwards."""
++    if _cached_llm_body() is not None:
++        return True
++    try:
++        from app.generator.llm_brief import llm_brief_body
++
++        body = llm_brief_body()
++    except Exception as exc:  # pragma: no cover - any LLM failure keeps the template
++        log.warning("brief generation fell back to the template: %s", exc)
++        return False
++    if not body:
++        return False
++    with db() as conn:
++        conn.execute(
++            "INSERT OR REPLACE INTO brief_cache (seed, brief_json) VALUES (?, ?)",
++            (LLM_BODY_KEY, json.dumps({"body": body})),
++        )
++    return True
++
++
+ def get_brief(seed: str) -> BriefInfo:
+-    """Cached per seed in SQLite; falls back to the template on any LLM failure."""
++    """Cached per seed in SQLite. Uses the LLM-written body when one is ready and it
++    passes the leak guard for this seed; otherwise the hand-written template. Never
++    calls a model itself."""
+     cached = _cached_brief(seed)
+     if cached is not None:
+         return cached
+ 
+     brief = template_brief()
+-    try:
++    body = _cached_llm_body()
++    if body is not None:
+         from app.generator.build import load_dataset
+-        from app.generator.llm_brief import llm_brief_body
+         from app.tutor.guard import leaks
+ 
+-        body = llm_brief_body()
+-        if body and leaks(body, load_dataset(seed).ground_truth) is None:
++        if leaks(body, load_dataset(seed).ground_truth) is None:
+             brief = BriefInfo(
+                 **{
+                     "from": sc.MANAGER_FROM,
+@@ -98,8 +144,7 @@ def get_brief(seed: str) -> BriefInfo:
+                     "task_definitions": list(TASK_DEFINITIONS),
+                 }
+             )
+-    except Exception as exc:  # pragma: no cover - any LLM failure keeps the template
+-        log.warning("brief generation fell back to the template: %s", exc)
+-
+-    _cache_brief(seed, brief)
++        # Only pin the choice once the LLM body exists, so sessions started while the
++        # startup call is still running do not freeze the template in for this seed.
++        _cache_brief(seed, brief)
+     return brief
+diff --git a/backend/app/generator/llm_brief.py b/backend/app/generator/llm_brief.py
+index cd2b76c..54edd0f 100644
+--- a/backend/app/generator/llm_brief.py
++++ b/backend/app/generator/llm_brief.py
+@@ -23,7 +23,6 @@ def llm_brief_body() -> str | None:
+             {"role": "system", "content": BRIEF_SYSTEM},
+             {"role": "user", "content": BRIEF_USER},
+         ],
+-        max_tokens=420,
+     )
+     if reply is None:
+         return None
+diff --git a/backend/app/main.py b/backend/app/main.py
+index ad1f2e3..467bbfb 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -30,7 +30,12 @@ def _prewarm_llm() -> None:
+         return
+     from app.tutor.llm import probe_primary
+ 
+-    probe_primary()
++    if probe_primary():
++        # Write the manager's message now, off the request path, so the first
++        # candidate's /init is instant.
++        from app.generator.brief import prewarm_llm_brief
++
++        prewarm_llm_brief()
+ 
+ 
+ @asynccontextmanager
+@@ -70,10 +75,14 @@ install_error_handlers(app)
+ 
+ @app.get("/health", response_model=HealthResponse, tags=["health"])
+ def health() -> HealthResponse:
+-    from app.tutor.llm import llm_is_up
+-
+-    # "up" only once a real call to the primary model has succeeded at startup.
+-    return HealthResponse(ok=True, llm="up" if llm_is_up() else "fallback")
++    from app.tutor.llm import llm_is_up, llm_reason
++
++    # "up" only while the most recent real call to the primary model succeeded.
++    # `llm_reason` says why it is in fallback (never contains a key).
++    up = llm_is_up()
++    return HealthResponse(
++        ok=True, llm="up" if up else "fallback", llm_reason=None if up else llm_reason()
++    )
+ 
+ 
+ from app.api import credential as credential_api  # noqa: E402
+diff --git a/backend/app/schemas.py b/backend/app/schemas.py
+index 084a57d..4959375 100644
+--- a/backend/app/schemas.py
++++ b/backend/app/schemas.py
+@@ -26,6 +26,8 @@ ID_PATTERN = r"^[A-Za-z0-9-]{1,20}$"
+ class HealthResponse(BaseModel):
+     ok: bool
+     llm: Literal["up", "fallback"]
++    # Present only in fallback: the reason the last LLM call failed (or was not made).
++    llm_reason: str | None = None
+ 
+ 
+ # ------------------------------------------------------------------- session / init
+diff --git a/backend/app/tutor/llm.py b/backend/app/tutor/llm.py
+index 5b9e55e..d30ed43 100644
+--- a/backend/app/tutor/llm.py
++++ b/backend/app/tutor/llm.py
+@@ -4,11 +4,18 @@ Provider order is primary -> optional fallback -> hand-written template. Every c
+ a plain chat completion (never the Responses API) with `api_base`, `api_key` and
+ `reasoning_effort` passed explicitly, a hard `LLM_TIMEOUT_S` deadline and no internal
+ retries. Nothing here can change a grade.
++
++Muse Spark is a reasoning model: even at `reasoning_effort=minimal` it spends a few
++hundred tokens thinking before it writes a word. A small `max_tokens` therefore starves
++the answer (empty content, or a provider error), so by default we send no cap at all and
++trim the reply ourselves. We also send no `temperature`, which reasoning models commonly
++reject. The last real outcome is kept so `/health` can say *why* it reports fallback.
+ """
+ 
+ from __future__ import annotations
+ 
+ import logging
++import time
+ from dataclasses import dataclass
+ 
+ from app.config import get_settings
+@@ -25,8 +32,33 @@ MAX_HINT_CHARS = 400
+ # pay for that discovery once rather than on every call.
+ _reasoning_effort_supported = True
+ 
+-# Result of the startup probe: None = not run, True/False = a real call succeeded/failed.
++# Outcome of the most recent real call to the primary model (the startup probe is one
++# such call): None = no call yet, True/False = it succeeded/failed.
+ _probe_result: bool | None = None
++_last_reason: str = "no call made yet"
++
++
++class EmptyReply(RuntimeError):
++    """The provider answered but the message had no text (usually a starved budget)."""
++
++
++def _scrub(text: object) -> str:
++    """An error message that is safe to log and to show in /health: no keys, one line."""
++    settings = get_settings()
++    out = " ".join(str(text).split())
++    for secret in (settings.llm_api_key, settings.llm_fallback_api_key):
++        if secret:
++            out = out.replace(secret, "***")
++    return out[:240]
++
++
++def _record(target: "Target", ok: bool, reason: str = "") -> None:
++    """Only the primary drives /health; the fallback is a courtesy."""
++    global _probe_result, _last_reason
++    if target.role != "primary":
++        return
++    _probe_result = ok
++    _last_reason = "ok" if ok else (reason or "unknown error")
+ 
+ 
+ @dataclass(frozen=True)
+@@ -70,40 +102,54 @@ def _rejects_reasoning_effort(exc: Exception) -> bool:
+ 
+ 
+ def _call_once(
+-    target: Target, messages: list[dict], *, max_tokens: int, with_effort: bool
+-) -> str | None:
+-    """Raises on provider failure; returns None only when the reply is empty."""
++    target: Target,
++    messages: list[dict],
++    *,
++    with_effort: bool,
++    timeout: float | None = None,
++) -> str:
++    """One request. Raises on provider failure and on an empty reply."""
+     import litellm
+ 
+     settings = get_settings()
++    deadline = timeout if timeout is not None else settings.llm_timeout_s
+     kwargs = {
+         "model": target.model,
+         "messages": messages,
+         "api_base": target.api_base or None,
+         "api_key": target.api_key,
+-        "timeout": settings.llm_timeout_s,
+-        "request_timeout": settings.llm_timeout_s,
+-        "max_tokens": max_tokens,
+-        "temperature": 0.5,
++        "timeout": deadline,
++        "request_timeout": deadline,
+         # LiteLLM retries internally by default, which blows straight through our
+         # deadline. One attempt per model, then the next target.
+         "num_retries": 0,
+     }
++    # No cap unless one is configured: reasoning tokens count against it.
++    if settings.llm_max_tokens > 0:
++        kwargs["max_tokens"] = settings.llm_max_tokens
+     if with_effort and settings.llm_reasoning_effort:
+         kwargs["reasoning_effort"] = settings.llm_reasoning_effort
+ 
+     response = litellm.completion(**kwargs)
+-    text = response["choices"][0]["message"]["content"]
+-    return text.strip() if isinstance(text, str) and text.strip() else None
++    choice = response["choices"][0]
++    text = choice["message"]["content"]
++    if not (isinstance(text, str) and text.strip()):
++        finish = choice.get("finish_reason") if hasattr(choice, "get") else None
++        raise EmptyReply(f"model returned no text (finish_reason={finish})")
++    return text.strip()
+ 
+ 
+-def _call(target: Target, messages: list[dict], *, max_tokens: int) -> str | None:
++def _call(
++    target: Target, messages: list[dict], *, timeout: float | None = None
++) -> str | None:
+     """One model, with a single retry if it rejects `reasoning_effort`."""
+     global _reasoning_effort_supported
+ 
+     send_effort = _reasoning_effort_supported
+     try:
+-        return _call_once(target, messages, max_tokens=max_tokens, with_effort=send_effort)
++        text = _call_once(target, messages, with_effort=send_effort, timeout=timeout)
++        _record(target, True)
++        return text
+     except Exception as exc:
+         if send_effort and _rejects_reasoning_effort(exc):
+             log.warning(
+@@ -115,83 +161,80 @@ def _call(target: Target, messages: list[dict], *, max_tokens: int) -> str | Non
+             )
+             _reasoning_effort_supported = False
+             try:
+-                return _call_once(
+-                    target, messages, max_tokens=max_tokens, with_effort=False
+-                )
++                text = _call_once(target, messages, with_effort=False, timeout=timeout)
++                _record(target, True)
++                return text
+             except Exception as retry_exc:
++                reason = f"{type(retry_exc).__name__}: {_scrub(retry_exc)}"
+                 log.warning(
+                     "%s (%s) failed without reasoning_effort too: %s",
+                     target.role,
+                     target.model,
+-                    retry_exc,
++                    reason,
+                 )
++                _record(target, False, reason)
+                 return None
+-        log.warning("%s (%s) call failed: %s", target.role, target.model, exc)
++        reason = f"{type(exc).__name__}: {_scrub(exc)}"
++        log.warning("%s (%s) call failed: %s", target.role, target.model, reason)
++        _record(target, False, reason)
+         return None
+ 
+ 
+-def complete(messages: list[dict], *, max_tokens: int = 160) -> Reply | None:
++def complete(messages: list[dict], *, timeout: float | None = None) -> Reply | None:
+     """Primary, then the fallback if one is configured. None means use the template."""
+     for target in targets():
+-        text = _call(target, messages, max_tokens=max_tokens)
++        text = _call(target, messages, timeout=timeout)
+         if text is not None:
+             return Reply(text=text, model=target.model)
+     return None
+ 
+ 
+ def probe_primary() -> bool:
+-    """A tiny real call, run once at startup, so /health reports what actually works.
++    """A small real call, run once at startup, so /health reports what actually works.
+ 
+-    Takes the same reasoning_effort retry as a real hint, so a provider that simply
+-    dislikes that parameter is reported as up rather than as broken.
++    It goes through exactly the same code path and parameters as a real hint, so a
++    green probe means hints will work and a red one carries the real reason.
+     """
+-    global _probe_result, _reasoning_effort_supported
++    global _probe_result, _last_reason
+     settings = get_settings()
+     if not settings.primary_llm_configured:
+         _probe_result = False
++        _last_reason = "LLM_API_KEY is not set"
+         return False
+ 
+     target = targets()[0]
+-    message = [{"role": "user", "content": "ping"}]
+-    attempts = [True, False] if _reasoning_effort_supported else [False]
+-
+-    for with_effort in attempts:
+-        try:
+-            _call_once(target, message, max_tokens=1, with_effort=with_effort)
+-            _probe_result = True
+-            log.info("LLM health probe succeeded against %s", target.model)
+-            return True
+-        except Exception as exc:
+-            if with_effort and _rejects_reasoning_effort(exc):
+-                log.warning(
+-                    "%s (%s) rejected reasoning_effort=%s during the health probe; "
+-                    "dropping it for the rest of this process",
+-                    target.role,
+-                    target.model,
+-                    settings.llm_reasoning_effort,
+-                )
+-                _reasoning_effort_supported = False
+-                continue
+-            _probe_result = False
+-            log.warning(
+-                "LLM health probe failed against %s (%s); /health will report fallback",
+-                target.model,
+-                exc,
+-            )
+-            return False
+-
+-    _probe_result = False
+-    return False
++    started = time.monotonic()
++    text = _call(target, [{"role": "user", "content": "Reply with the single word: ok"}])
++    elapsed = time.monotonic() - started
++    if text is None:
++        log.warning(
++            "LLM health probe failed against %s after %.1fs (%s); /health will report "
++            "fallback until a real call succeeds",
++            target.model,
++            elapsed,
++            _last_reason,
++        )
++        return False
++    log.info("LLM health probe succeeded against %s in %.1fs", target.model, elapsed)
++    return True
+ 
+ 
+ def llm_is_up() -> bool:
+-    """True only once a real call to the primary model has succeeded."""
++    """True when the most recent real call to the primary model succeeded."""
+     return _probe_result is True
+ 
+ 
++def llm_reason() -> str:
++    """Why /health says what it says. Never contains a key."""
++    if not get_settings().primary_llm_configured:
++        return "LLM_API_KEY is not set"
++    return _last_reason
++
++
+ def reset_probe() -> None:
+-    global _probe_result
++    global _probe_result, _last_reason
+     _probe_result = None
++    _last_reason = "no call made yet"
+ 
+ 
+ def _tidy(text: str) -> str:
+@@ -236,6 +279,8 @@ def llm_hint_text(
+         },
+     ]
+ 
++    budget = get_settings().llm_timeout_s
++    started = time.monotonic()
+     first = complete(messages)
+     if first is None:
+         return None
+@@ -253,7 +298,12 @@ def llm_hint_text(
+         {"role": "assistant", "content": text},
+         {"role": "system", "content": STRICTER_REMINDER},
+     ]
+-    second = complete(messages)
++    # The retry only gets whatever is left of the budget; a candidate should never wait
++    # two full timeouts for one hint.
++    remaining = budget - (time.monotonic() - started)
++    if remaining < 2:
++        return None
++    second = complete(messages, timeout=remaining)
+     if second is None:
+         return None
+     retried = _tidy(second.text)
+diff --git a/backend/app/tutor/templates.py b/backend/app/tutor/templates.py
+index 6e6e888..2e0cf6e 100644
+--- a/backend/app/tutor/templates.py
++++ b/backend/app/tutor/templates.py
+@@ -36,10 +36,48 @@ def clamp_level(attempt_no: int) -> int:
+     return max(1, min(attempt_no, MAX_LEVEL))
+ 
+ 
+-def template_text(level: int, field_status: dict[str, str]) -> str:
+-    """Address only the fields that are wrong, at most two sentences."""
+-    rung = LADDER[clamp_level(level)]
+-    parts = [rung[name] for name in FIELD_ORDER if field_status.get(name) != "correct"]
++# Sharper openers for the three mistakes the grader can recognise. Like the ladder they
++# are fixed text: no amount, no ID, nothing seed-specific.
++DIAGNOSTIC_HINTS: dict[str, str] = {
++    "included_cash": (
++        "Your total is too high, and it looks like cash sales were counted. Does cash "
++        "ever reach the bank statement?"
++    ),
++    "hit_decoy": (
++        "That transfer shares its amount with another one, and only one of them is "
++        "missing. Which of the two has its customer reference in a bank narration?"
++    ),
++    "picked_original_waybill": (
++        "You found the right delivery, but that is the original entry. Which copy was "
++        "logged second, with the product name misspelled?"
++    ),
++}
++
++
++def _field_text(name: str, level: int, diagnostics) -> str:
++    """The diagnostic opener when the grader recognised the mistake, else the ladder."""
++    if diagnostics is not None:
++        if name == "discrepancy_ngn" and diagnostics.included_cash:
++            return DIAGNOSTIC_HINTS["included_cash"]
++        if name == "missing_tx_id" and diagnostics.hit_decoy:
++            return DIAGNOSTIC_HINTS["hit_decoy"]
++        if name == "duplicate_wb_id" and diagnostics.picked_original_waybill:
++            return DIAGNOSTIC_HINTS["picked_original_waybill"]
++    return LADDER[clamp_level(level)][name]
++
++
++def template_text(level: int, field_status: dict[str, str], diagnostics=None) -> str:
++    """Address only the fields that are wrong, two fields at most.
++
++    `diagnostics` is the grader's private read of the mistake (decoy picked, cash
++    included, original waybill picked). When it recognises one, the hint speaks to that
++    mistake; it still never names an amount or an ID.
++    """
++    parts = [
++        _field_text(name, level, diagnostics)
++        for name in FIELD_ORDER
++        if field_status.get(name) != "correct"
++    ]
+     if not parts:  # pragma: no cover - a hint is only built for a failed attempt
+-        parts = [rung["discrepancy_ngn"]]
++        parts = [LADDER[clamp_level(level)]["discrepancy_ngn"]]
+     return " ".join(parts[:2])
+diff --git a/backend/app/tutor/tutor.py b/backend/app/tutor/tutor.py
+index ee298c9..55af44f 100644
+--- a/backend/app/tutor/tutor.py
++++ b/backend/app/tutor/tutor.py
+@@ -35,7 +35,9 @@ def build_hint(
+         )
+ 
+     fallback = TutorHint(
+-        level=level, text=templates.template_text(level, status), source="template"
++        level=level,
++        text=templates.template_text(level, status, diagnostics),
++        source="template",
+     )
+ 
+     drafted = _llm_hint(
+diff --git a/backend/tests/test_credentials.py b/backend/tests/test_credentials.py
+index 4210411..877bae8 100644
+--- a/backend/tests/test_credentials.py
++++ b/backend/tests/test_credentials.py
+@@ -261,3 +261,31 @@ def test_a_hash_that_no_seed_reproduces_is_still_unknown(badge):
+     assert result.signature_verified is True
+     assert result.hash_match is False
+     assert result.reason == "hash_unknown"
++
++
++# ---------------------------------------------------------------- the signed sample
++
++
++def test_the_sample_credential_is_genuinely_signed(client):
++    sample = client.get("/api/credential/sample").json()
++    assert "sample" in sample["credentialSubject"]["name"].lower()
++    verdict = client.post("/api/credential/verify", json={"badge": sample}).json()
++    assert verdict["valid"] is True
++    assert verdict["signature_verified"] and verdict["hash_match"] and verdict["issuer_match"]
++
++
++def test_a_tampered_sample_fails(client):
++    sample = client.get("/api/credential/sample").json()
++    sample["credentialSubject"]["name"] = "Someone Else"
++    verdict = client.post("/api/credential/verify", json={"badge": sample}).json()
++    assert verdict["valid"] is False
++    assert verdict["reason"] == "signature_invalid"
++
++
++def test_the_sample_credential_holds_no_ground_truth(client):
++    from app.generator.build import generate
++
++    truth = generate("demo").ground_truth
++    text = client.get("/api/credential/sample").text
++    for secret in (truth.missing_tx_id, truth.duplicate_wb_id, truth.decoy_tx_id):
++        assert secret not in text
+diff --git a/backend/tests/test_guard.py b/backend/tests/test_guard.py
+index 492c2f2..d92b6a5 100644
+--- a/backend/tests/test_guard.py
++++ b/backend/tests/test_guard.py
+@@ -121,3 +121,67 @@ def test_hints_only_address_incorrect_fields():
+     )
+     text = templates.template_text(1, status.model_dump())
+     assert text == templates.LADDER[1]["missing_tx_id"]
++
++
++# ------------------------------------------------------------ diagnostic openers
++
++
++def test_diagnostic_openers_are_safe_for_every_seed():
++    """Fixed text again: no amount, no ID, for any dataset."""
++    from app.generator.build import generate
++
++    for i in range(200):
++        truth = generate(f"seed-{i}").ground_truth
++        for text in templates.DIAGNOSTIC_HINTS.values():
++            assert is_safe(text, truth), text
++    for text in templates.DIAGNOSTIC_HINTS.values():
++        assert is_safe(text, TRUTH)
++        assert not any(ch.isdigit() for ch in text)
++
++
++def test_a_recognised_mistake_gets_its_own_template_hint():
++    """The offline tutor still speaks to the mistake the grader recognised."""
++    from app.grading.grade import grade
++
++    result = grade(
++        truth=TRUTH,
++        discrepancy_ngn=TRUTH.discrepancy_ngn + TRUTH.cash_total_ngn,
++        missing_tx_id=TRUTH.decoy_tx_id,
++        duplicate_wb_id=TRUTH.duplicate_wb_id,
++    )
++    hint = build_hint(
++        session=_session(),
++        field_status=FieldStatusMap(**result.field_status),
++        diagnostics=result.diagnostics,
++        attempt_no=1,
++    )
++    assert hint.source == "template"
++    assert templates.DIAGNOSTIC_HINTS["included_cash"] in hint.text
++    assert templates.DIAGNOSTIC_HINTS["hit_decoy"] in hint.text
++    assert is_safe(hint.text, TRUTH)
++
++    original = grade(
++        truth=TRUTH,
++        discrepancy_ngn=TRUTH.discrepancy_ngn,
++        missing_tx_id=TRUTH.missing_tx_id,
++        duplicate_wb_id=TRUTH.original_wb_id,
++    )
++    text = templates.template_text(
++        1, original.field_status, original.diagnostics
++    )
++    assert text == templates.DIAGNOSTIC_HINTS["picked_original_waybill"]
++
++
++def test_an_unrecognised_mistake_still_uses_the_ladder():
++    from app.grading.grade import grade
++
++    result = grade(
++        truth=TRUTH,
++        discrepancy_ngn=TRUTH.discrepancy_ngn + 1,
++        missing_tx_id="POS-0000",
++        duplicate_wb_id=TRUTH.duplicate_wb_id,
++    )
++    text = templates.template_text(2, result.field_status, result.diagnostics)
++    assert text == " ".join(
++        [templates.LADDER[2]["discrepancy_ngn"], templates.LADDER[2]["missing_tx_id"]]
++    )
+diff --git a/backend/tests/test_session.py b/backend/tests/test_session.py
+index 11fd420..9f972b1 100644
+--- a/backend/tests/test_session.py
++++ b/backend/tests/test_session.py
+@@ -207,6 +207,17 @@ def test_bad_ids_are_rejected_as_invalid_input(client):
+     )
+     assert res.status_code == 422
+     assert res.json()["error"]["code"] == "invalid_input"
++    # The error must not hand out the demo answers as "examples".
++    message = res.json()["error"]["message"]
++    assert "1042" not in message and "3311" not in message
++
++
++def test_there_is_one_task_definition_per_task_in_ui_order(client):
++    definitions = _init(client)["brief"]["task_definitions"]
++    assert len(definitions) == 3
++    assert "discrepancy_ngn" in definitions[0]
++    assert "tx_id" in definitions[1] and "customer_ref" in definitions[1]
++    assert "duplicate waybill" in definitions[2]
+ 
+ 
+ def test_submit_on_an_unknown_session_is_404(client):
+diff --git a/backend/tests/test_tutor_llm.py b/backend/tests/test_tutor_llm.py
+index 1152840..02299d3 100644
+--- a/backend/tests/test_tutor_llm.py
++++ b/backend/tests/test_tutor_llm.py
+@@ -10,7 +10,12 @@ from datetime import datetime, timezone
+ import pytest
+ 
+ from app.config import get_settings
+-from app.generator.brief import TEMPLATE_BODY, get_brief, template_brief
++from app.generator.brief import (
++    TEMPLATE_BODY,
++    get_brief,
++    prewarm_llm_brief,
++    template_brief,
++)
+ from app.generator.build import generate
+ from app.schemas import FieldStatusMap
+ from app.store.sessions import SessionRecord
+@@ -145,6 +150,10 @@ def test_the_call_carries_api_base_key_effort_timeout_and_no_retries(primary, mo
+     assert kwargs["timeout"] == get_settings().llm_timeout_s
+     assert kwargs["request_timeout"] == get_settings().llm_timeout_s
+     assert kwargs["num_retries"] == 0
++    # Muse Spark reasons before it answers: a token cap starves the reply, and
++    # reasoning models commonly reject a custom temperature. Send neither.
++    assert "max_tokens" not in kwargs
++    assert "temperature" not in kwargs
+     # Chat completions, not the Responses API.
+     assert isinstance(kwargs["messages"], list)
+     assert {m["role"] for m in kwargs["messages"]} <= {"system", "user", "assistant"}
+@@ -332,6 +341,7 @@ def test_the_brief_uses_the_llm_when_it_is_clean(primary, monkeypatch):
+     calls: list[dict] = []
+     body = " ".join(["The October books close on Friday and auditors flagged two issues."] * 14)
+     install(monkeypatch, {PRIMARY: body}, calls)
++    assert prewarm_llm_brief() is True
+     brief = get_brief("demo")
+ 
+     from app.generator.brief import DISCREPANCY_DEFINITION, TASK_DEFINITIONS
+@@ -345,12 +355,14 @@ def test_a_leaking_brief_is_discarded(primary, monkeypatch):
+     calls: list[dict] = []
+     body = " ".join(["Find the missing ₦45,000 transfer from the till today please."] * 14)
+     install(monkeypatch, {PRIMARY: body}, calls)
++    prewarm_llm_brief()
+     assert get_brief("demo").body_markdown == TEMPLATE_BODY
+ 
+ 
+ def test_a_too_short_brief_is_discarded(primary, monkeypatch):
+     calls: list[dict] = []
+     install(monkeypatch, {PRIMARY: "Too short."}, calls)
++    assert prewarm_llm_brief() is False
+     assert get_brief("demo").body_markdown == TEMPLATE_BODY
+ 
+ 
+@@ -358,14 +370,35 @@ def test_the_brief_is_cached_per_seed(primary, monkeypatch):
+     calls: list[dict] = []
+     body = " ".join(["We are closing the October books for head office this week."] * 14)
+     install(monkeypatch, {PRIMARY: body}, calls)
++    prewarm_llm_brief()
+     assert get_brief("cache-me") == get_brief("cache-me")
+-    assert len(calls) == 1  # the second came from SQLite
++    assert len(calls) == 1  # one model call for the whole process
++
++
++def test_the_brief_is_written_once_and_reused_for_every_seed(primary, monkeypatch):
++    calls: list[dict] = []
++    body = " ".join(["We are closing the October books for head office this week."] * 14)
++    install(monkeypatch, {PRIMARY: body}, calls)
++    prewarm_llm_brief()
++    prewarm_llm_brief()
++    for seed in ("seed-a", "seed-b", "seed-c"):
++        assert body.split(".")[0] in get_brief(seed).body_markdown
++    assert len(calls) == 1
++
++
++def test_init_never_waits_on_a_model(primary, monkeypatch):
++    """`get_brief` runs inside /api/session/init. It must not call the LLM itself."""
++    calls: list[dict] = []
++    install(monkeypatch, {PRIMARY: TimeoutError("slow")}, calls)
++    assert get_brief("no-prewarm").body_markdown == TEMPLATE_BODY
++    assert calls == []
+ 
+ 
+ def test_the_brief_can_come_from_the_fallback(with_fallback, monkeypatch):
+     calls: list[dict] = []
+     body = " ".join(["Head office wants the October reconciliation closed by Friday."] * 14)
+     install(monkeypatch, {PRIMARY: Exception("down"), FALLBACK: body}, calls)
++    prewarm_llm_brief()
+     assert body.split(".")[0] in get_brief("fallback-seed").body_markdown
+ 
+ 
+@@ -373,7 +406,9 @@ def test_the_brief_can_come_from_the_fallback(with_fallback, monkeypatch):
+ 
+ 
+ def test_health_is_fallback_before_any_probe_runs(client):
+-    assert client.get("/health").json() == {"ok": True, "llm": "fallback"}
++    body = client.get("/health").json()
++    assert (body["ok"], body["llm"]) == (True, "fallback")
++    assert body["llm_reason"] == "LLM_API_KEY is not set"
+ 
+ 
+ def test_health_is_fallback_when_the_probe_fails(primary, monkeypatch, client):
+@@ -381,16 +416,21 @@ def test_health_is_fallback_when_the_probe_fails(primary, monkeypatch, client):
+     install(monkeypatch, {PRIMARY: Exception("401 unauthorized")}, calls)
+     assert llm_module.probe_primary() is False
+     assert len(calls) == 1
+-    assert client.get("/health").json() == {"ok": True, "llm": "fallback"}
++    body = client.get("/health").json()
++    assert (body["ok"], body["llm"]) == (True, "fallback")
++    # The real reason is surfaced, and the key never is.
++    assert "401 unauthorized" in body["llm_reason"]
++    assert "meta-test-key" not in body["llm_reason"]
+ 
+ 
+ def test_health_is_up_only_after_a_real_call_succeeds(primary, monkeypatch, client):
+     calls: list[dict] = []
+     install(monkeypatch, {PRIMARY: "pong"}, calls)
+     assert llm_module.probe_primary() is True
+-    assert calls[0]["max_tokens"] == 1
++    # The probe is an ordinary call: same parameters as a hint, no token cap.
++    assert "max_tokens" not in calls[0]
+     assert calls[0]["model"] == PRIMARY
+-    assert client.get("/health").json() == {"ok": True, "llm": "up"}
++    assert client.get("/health").json() == {"ok": True, "llm": "up", "llm_reason": None}
+ 
+ 
+ def test_the_probe_does_not_run_without_a_key(monkeypatch):
+@@ -414,9 +454,62 @@ def test_the_probe_survives_a_provider_that_dislikes_reasoning_effort(
+     install(monkeypatch, behaviour, calls)
+     assert llm_module.probe_primary() is True
+     assert len(calls) == 2
+-    assert client.get("/health").json() == {"ok": True, "llm": "up"}
++    assert client.get("/health").json()["llm"] == "up"
+ 
+     # The hint path then skips the parameter from the start.
+     calls.clear()
+     build_hint(session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1)
+     assert len(calls) == 1 and "reasoning_effort" not in calls[0]
++
++
++# ------------------------------------------------------- reasoning-model behaviour
++
++
++def test_an_empty_reply_is_a_failure_with_a_reason(primary, monkeypatch, client):
++    """A reasoning model that spends its whole budget thinking returns no text. That
++    must read as 'fallback, and here is why', never as 'up'."""
++    calls: list[dict] = []
++    install(monkeypatch, {PRIMARY: ""}, calls)
++    assert llm_module.probe_primary() is False
++    body = client.get("/health").json()
++    assert body["llm"] == "fallback"
++    assert "no text" in body["llm_reason"]
++
++    hint = build_hint(
++        session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1
++    )
++    assert hint.source == "template"
++
++
++def test_a_configured_token_cap_is_sent(primary, monkeypatch):
++    monkeypatch.setattr(get_settings(), "llm_max_tokens", 900, raising=False)
++    calls: list[dict] = []
++    install(monkeypatch, {PRIMARY: "Which table?"}, calls)
++    build_hint(session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1)
++    assert calls[0]["max_tokens"] == 900
++
++
++def test_health_follows_the_most_recent_real_call(primary, monkeypatch, client):
++    """A slow model at boot must not pin /health to fallback for the life of the process."""
++    calls: list[dict] = []
++    install(monkeypatch, {PRIMARY: TimeoutError("cold start")}, calls)
++    assert llm_module.probe_primary() is False
++    assert client.get("/health").json()["llm"] == "fallback"
++
++    install(monkeypatch, {PRIMARY: "Which table should every transfer reach?"}, calls)
++    hint = build_hint(
++        session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1
++    )
++    assert hint.source == "llm"
++    assert client.get("/health").json()["llm"] == "up"
++
++
++def test_a_key_in_a_provider_error_is_scrubbed(primary, monkeypatch, client):
++    calls: list[dict] = []
++    install(
++        monkeypatch,
++        {PRIMARY: Exception("Incorrect API key provided: meta-test-key")},
++        calls,
++    )
++    llm_module.probe_primary()
++    assert "meta-test-key" not in client.get("/health").json()["llm_reason"]
+diff --git a/frontend/public/workspace-preview.svg b/frontend/public/workspace-preview.svg
+index 65c142a..31803dd 100644
+--- a/frontend/public/workspace-preview.svg
++++ b/frontend/public/workspace-preview.svg
+@@ -35,16 +35,16 @@
+   <!-- Left Pane Form Fields (24px padding, 16px gap) -->
+   <text x="25" y="118" font-family="sans-serif" font-size="11" font-weight="700" fill="#334155">1. Total net discrepancy (₦)</text>
+   <rect x="25" y="126" width="232" height="36" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+-  <text x="37" y="149" font-family="monospace" font-size="13" font-weight="600" fill="#065F46">45,000</text>
++  <text x="37" y="149" font-family="monospace" font-size="13" font-weight="600" fill="#065F46">••,•••</text>
+   <text x="245" y="149" font-family="sans-serif" font-size="11" font-weight="700" fill="#059669" text-anchor="end">✓ Locked</text>
+ 
+   <text x="25" y="186" font-family="sans-serif" font-size="11" font-weight="700" fill="#334155">2. Missing bank transaction ID</text>
+   <rect x="25" y="194" width="232" height="36" rx="6" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5"/>
+-  <text x="37" y="217" font-family="monospace" font-size="13" font-weight="600" fill="#0F172A">POS-1042</text>
++  <text x="37" y="217" font-family="monospace" font-size="13" font-weight="600" fill="#0F172A">POS-••••</text>
+ 
+   <text x="25" y="254" font-family="sans-serif" font-size="11" font-weight="700" fill="#334155">3. Duplicated waybill ID</text>
+   <rect x="25" y="262" width="232" height="36" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+-  <text x="37" y="285" font-family="monospace" font-size="13" font-weight="600" fill="#065F46">WB-3311</text>
++  <text x="37" y="285" font-family="monospace" font-size="13" font-weight="600" fill="#065F46">WB-••••</text>
+   <text x="245" y="285" font-family="sans-serif" font-size="11" font-weight="700" fill="#059669" text-anchor="end">✓ Locked</text>
+ 
+   <!-- Submit Button -->
+@@ -90,46 +90,45 @@
+   <text x="710" y="170" font-family="monospace" font-size="14" font-weight="700" fill="#334155">ref</text>
+ 
+   <!-- Row 1 -->
+-  <text x="319" y="210" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-1039</text>
++  <text x="319" y="210" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-2011</text>
+   <text x="419" y="210" font-family="monospace" font-size="14" fill="#334155">2026-10-12</text>
+-  <text x="525" y="210" font-family="monospace" font-size="14" fill="#0F172A">65,000</text>
++  <text x="525" y="210" font-family="monospace" font-size="14" fill="#0F172A">18,400</text>
+   <text x="625" y="210" font-family="sans-serif" font-size="14" fill="#334155">TRANSFER</text>
+-  <text x="710" y="210" font-family="monospace" font-size="14" fill="#334155">TRF-88139</text>
++  <text x="710" y="210" font-family="monospace" font-size="14" fill="#334155">TRF-40139</text>
+   <line x1="307" y1="224" x2="774" y2="224" stroke="#E2E8F0"/>
+ 
+   <!-- Row 2 -->
+   <rect x="307" y="225" width="467" height="40" fill="#F8FAFC"/>
+-  <text x="319" y="250" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-1041</text>
++  <text x="319" y="250" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-2012</text>
+   <text x="419" y="250" font-family="monospace" font-size="14" fill="#334155">2026-10-14</text>
+-  <text x="525" y="250" font-family="monospace" font-size="14" fill="#0F172A">37,500</text>
++  <text x="525" y="250" font-family="monospace" font-size="14" fill="#0F172A">52,250</text>
+   <text x="625" y="250" font-family="sans-serif" font-size="14" fill="#334155">Transfer</text>
+-  <text x="710" y="250" font-family="monospace" font-size="14" fill="#334155">TRF-88162</text>
++  <text x="710" y="250" font-family="monospace" font-size="14" fill="#334155">TRF-40162</text>
+   <line x1="307" y1="265" x2="774" y2="265" stroke="#E2E8F0"/>
+ 
+-  <!-- Row 3 (Highlighted Anomaly) -->
+-  <rect x="307" y="266" width="467" height="40" fill="#FEF3C7"/>
+-  <text x="319" y="291" font-family="monospace" font-size="14" font-weight="700" fill="#92400E">POS-1042</text>
+-  <text x="419" y="291" font-family="monospace" font-size="14" fill="#92400E">Oct 14 2026</text>
+-  <text x="525" y="291" font-family="monospace" font-size="14" font-weight="700" fill="#92400E">₦45,000</text>
+-  <text x="625" y="291" font-family="sans-serif" font-size="14" fill="#92400E">Transfer</text>
+-  <text x="710" y="291" font-family="monospace" font-size="14" fill="#92400E">TRF-88190</text>
+-  <line x1="307" y1="306" x2="774" y2="306" stroke="#FDE68A"/>
++  <!-- Row 3 -->
++    <text x="319" y="291" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-2013</text>
++  <text x="419" y="291" font-family="monospace" font-size="14" fill="#334155">Oct 14 2026</text>
++  <text x="525" y="291" font-family="monospace" font-size="14" fill="#0F172A">₦9,750</text>
++  <text x="625" y="291" font-family="sans-serif" font-size="14" fill="#334155">Transfer</text>
++  <text x="710" y="291" font-family="monospace" font-size="14" fill="#334155">TRF-40190</text>
++  <line x1="307" y1="306" x2="774" y2="306" stroke="#E2E8F0"/>
+ 
+   <!-- Row 4 -->
+-  <text x="319" y="332" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-1043</text>
++  <text x="319" y="332" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-2014</text>
+   <text x="419" y="332" font-family="monospace" font-size="14" fill="#334155">2026-10-15</text>
+-  <text x="525" y="332" font-family="monospace" font-size="14" fill="#0F172A">30000</text>
++  <text x="525" y="332" font-family="monospace" font-size="14" fill="#0F172A">26000</text>
+   <text x="625" y="332" font-family="sans-serif" font-size="14" fill="#334155">transfer</text>
+-  <text x="710" y="332" font-family="monospace" font-size="14" fill="#334155">TRF-88241</text>
++  <text x="710" y="332" font-family="monospace" font-size="14" fill="#334155">TRF-40241</text>
+   <line x1="307" y1="347" x2="774" y2="347" stroke="#E2E8F0"/>
+ 
+   <!-- Row 5 -->
+   <rect x="307" y="348" width="467" height="40" fill="#F8FAFC"/>
+-  <text x="319" y="373" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-1046</text>
++  <text x="319" y="373" font-family="monospace" font-size="14" font-weight="600" fill="#0F172A">POS-2015</text>
+   <text x="419" y="373" font-family="monospace" font-size="14" fill="#334155">15/10/2026</text>
+-  <text x="525" y="373" font-family="monospace" font-size="14" fill="#0F172A">48,000.00</text>
++  <text x="525" y="373" font-family="monospace" font-size="14" fill="#0F172A">31,600.00</text>
+   <text x="625" y="373" font-family="sans-serif" font-size="14" fill="#334155">Transfer</text>
+-  <text x="710" y="373" font-family="monospace" font-size="14" fill="#334155">TRF-88276</text>
++  <text x="710" y="373" font-family="monospace" font-size="14" fill="#334155">TRF-40276</text>
+ 
+   <!-- Visible Horizontal Scrollbar Track -->
+   <rect x="307" y="418" width="467" height="15" rx="3" fill="#F1F5F9"/>
+diff --git a/frontend/src/app/briefing/page.tsx b/frontend/src/app/briefing/page.tsx
+index 7049233..d9865a4 100644
+--- a/frontend/src/app/briefing/page.tsx
++++ b/frontend/src/app/briefing/page.tsx
+@@ -18,7 +18,7 @@ import {
+   Sparkles,
+   UserCheck,
+ } from "lucide-react";
+-import { initSession, isMockMode } from "@/lib/api";
++import { isMockMode } from "@/lib/api";
+ import { useSession } from "@/lib/session-context";
+ 
+ function renderInlineMarkdown(text: string): React.ReactNode[] {
+@@ -81,68 +81,20 @@ export default function BriefingPage() {
+     }
+   }, []);
+ 
+-  // Automatically initialize a default session if visited directly without one
+-  useEffect(() => {
+-    if (!isHydrated || session || isBootstrapping || forceEmptyState) return;
+-    let cancelled = false;
+-
+-    const autoInit = async () => {
+-      setIsBootstrapping(true);
+-      setErrorMessage(null);
+-      try {
+-        const params = new URLSearchParams(window.location.search);
+-        const seedParam = params.get("seed");
+-        const res = await initSession({
+-          candidate_name: "Ada Okafor",
+-          seed: seedParam || "demo",
+-        });
+-        if (!cancelled) {
+-          setSessionData(
+-            res,
+-            "Ada Okafor",
+-            seedParam === "demo" ? "demo" : undefined
+-          );
+-        }
+-      } catch (err) {
+-        if (!cancelled) {
+-          setErrorMessage(
+-            err instanceof Error
+-              ? err.message
+-              : "Failed to load briefing scenario."
+-          );
+-        }
+-      } finally {
+-        if (!cancelled) {
+-          setIsBootstrapping(false);
+-        }
+-      }
+-    };
+-
+-    autoInit();
+-    return () => {
+-      cancelled = true;
+-    };
+-  }, [isHydrated, session, isBootstrapping, forceEmptyState, setSessionData]);
++  // A briefing only exists for a session the candidate started themselves. Opened
++  // directly (new tab, shared link, expired tab), send them to the start screen
++  // instead of inventing a session under a placeholder name.
++  const goToStart = React.useCallback(() => {
++    router.replace(`/${window.location.search}`);
++  }, [router]);
+ 
+-  const handleRetryLoad = async () => {
+-    setForceEmptyState(false);
+-    setErrorMessage(null);
+-    setIsBootstrapping(true);
+-    try {
+-      const res = await initSession({
+-        candidate_name: candidateName || "Ada Okafor",
+-        seed: "demo",
+-      });
+-      setSessionData(res, candidateName || "Ada Okafor", seed);
+-    } catch (err) {
+-      const msg =
+-        err instanceof Error ? err.message : "Failed to initialize session.";
+-      setErrorMessage(msg);
+-      showToast(msg, "init_failed", "error");
+-    } finally {
+-      setIsBootstrapping(false);
++  useEffect(() => {
++    if (isHydrated && !session) {
++      goToStart();
+     }
+-  };
++  }, [isHydrated, session, goToStart]);
++
++  const handleRetryLoad = goToStart;
+ 
+   const handleBeginWorkspace = () => {
+     startTimer();
+diff --git a/frontend/src/app/page.tsx b/frontend/src/app/page.tsx
+index 640d282..0fe2a46 100644
+--- a/frontend/src/app/page.tsx
++++ b/frontend/src/app/page.tsx
+@@ -73,7 +73,9 @@ export default function StartScreenPage() {
+     try {
+       const initResponse = await initSession({
+         candidate_name: trimmedName,
+-        seed: urlSeed ?? "demo",
++        // Only ?seed=demo pins the dataset. Everyone else gets a fresh, unique
++        // dataset from the server, so answers cannot be shared between candidates.
++        seed: urlSeed ?? undefined,
+       });
+       setSessionData(initResponse, trimmedName, urlSeed ?? undefined);
+       router.push("/briefing");
+@@ -347,8 +349,9 @@ export default function StartScreenPage() {
+                       </p>
+                       {isWakingServer && (
+                         <p className="mt-1 text-amber-800">
+-                          Cold-starting the backend instance — this can take
+-                          30–50 seconds on first load.
++                          The server sleeps when idle and is starting up. This
++                          can take up to a minute on first load — please keep
++                          this tab open.
+                         </p>
+                       )}
+                     </div>
+diff --git a/frontend/src/app/verify/page.tsx b/frontend/src/app/verify/page.tsx
+index f7934ed..573fe6d 100644
+--- a/frontend/src/app/verify/page.tsx
++++ b/frontend/src/app/verify/page.tsx
+@@ -11,7 +11,7 @@ import {
+   ShieldCheck,
+   Upload,
+ } from "lucide-react";
+-import { getIssuer, verifyBadge } from "@/lib/api";
++import { getIssuer, getSampleCredential, verifyBadge } from "@/lib/api";
+ import type {
+   BadgeCredential,
+   IssuerProfile,
+@@ -19,7 +19,6 @@ import type {
+ } from "@/lib/api-types";
+ import { useSession } from "@/lib/session-context";
+ import VerifyResult from "@/components/VerifyResult";
+-import submitPassFixture from "@/mocks/submit-pass.json";
+ 
+ export default function StandaloneVerifyPage() {
+   const { badge: sessionBadge, showToast } = useSession();
+@@ -28,6 +27,7 @@ export default function StandaloneVerifyPage() {
+   const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
+   const [isVerifying, setIsVerifying] = useState(false);
+   const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
++  const [isLoadingSample, setIsLoadingSample] = useState(false);
+   const [issuer, setIssuer] = useState<IssuerProfile | null>(null);
+ 
+   const textareaId = useId();
+@@ -58,22 +58,38 @@ export default function StandaloneVerifyPage() {
+     }
+   };
+ 
+-  const handleLoadSampleValid = () => {
+-    const targetBadge = sessionBadge ?? submitPassFixture.badge;
+-    setJsonInput(JSON.stringify(targetBadge, null, 2));
+-    setUploadedFilename("sample-valid-badge.json");
+-    setVerifyResult(null);
++  // Samples come from the candidate's own badge when there is one, otherwise from the
++  // backend, which signs a specimen with the live issuer key. Either way the verifier
++  // below is checking a real signature, never a canned one.
++  const loadSample = async (tampered: boolean) => {
++    if (isLoadingSample) return;
++    setIsLoadingSample(true);
++    try {
++      const base = structuredClone(
++        (sessionBadge ?? (await getSampleCredential())) as BadgeCredential
++      );
++      if (tampered) {
++        base.credentialSubject.name = `${base.credentialSubject.name} (edited)`;
++      }
++      setJsonInput(JSON.stringify(base, null, 2));
++      setUploadedFilename(
++        tampered ? "sample-tampered-badge.json" : "sample-valid-badge.json"
++      );
++      setVerifyResult(null);
++    } catch (err) {
++      showToast(
++        err instanceof Error
++          ? err.message
++          : "Could not load a sample credential from the server.",
++        "sample_error"
++      );
++    } finally {
++      setIsLoadingSample(false);
++    }
+   };
+ 
+-  const handleLoadSampleTampered = () => {
+-    const baseBadge = structuredClone(
+-      (sessionBadge ?? submitPassFixture.badge) as BadgeCredential
+-    );
+-    baseBadge.credentialSubject.name = `${baseBadge.credentialSubject.name} (edited)`;
+-    setJsonInput(JSON.stringify(baseBadge, null, 2));
+-    setUploadedFilename("sample-tampered-badge.json");
+-    setVerifyResult(null);
+-  };
++  const handleLoadSampleValid = () => loadSample(false);
++  const handleLoadSampleTampered = () => loadSample(true);
+ 
+   const handleVerifySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+     e.preventDefault();
+@@ -232,6 +248,7 @@ export default function StandaloneVerifyPage() {
+                 <button
+                   type="button"
+                   onClick={handleLoadSampleValid}
++                  disabled={isLoadingSample}
+                   className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                 >
+                   <FileJson className="h-3.5 w-3.5" aria-hidden="true" />
+@@ -241,6 +258,7 @@ export default function StandaloneVerifyPage() {
+                 <button
+                   type="button"
+                   onClick={handleLoadSampleTampered}
++                  disabled={isLoadingSample}
+                   className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-900 hover:bg-red-100"
+                 >
+                   <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+diff --git a/frontend/src/app/workspace/page.tsx b/frontend/src/app/workspace/page.tsx
+index 8717ff3..8f239c4 100644
+--- a/frontend/src/app/workspace/page.tsx
++++ b/frontend/src/app/workspace/page.tsx
+@@ -17,7 +17,7 @@ import {
+   ShieldCheck,
+ } from "lucide-react";
+ import { useRouter } from "next/navigation";
+-import { initSession, isMockMode } from "@/lib/api";
++import { isMockMode } from "@/lib/api";
+ import { useSession, type WorkspaceTabKey } from "@/lib/session-context";
+ import BriefPanel from "@/components/BriefPanel";
+ import SubmissionForm from "@/components/SubmissionForm";
+@@ -91,76 +91,29 @@ export default function WorkspacePage() {
+     }
+   }, [isHydrated, session, timerStartedAt, startTimer]);
+ 
+-  // Auto-initialize demo session if user/test opens /workspace directly without a session
++  // The workspace only exists for a session the candidate started themselves. Opened
++  // directly (new tab, shared link, expired tab), go back to the start screen rather
++  // than inventing a session under a placeholder name.
++  const goToStart = React.useCallback(() => {
++    router.replace(`/${window.location.search}`);
++  }, [router]);
++
++  const leavingRef = useRef(false);
+   useEffect(() => {
+-    if (!isHydrated || session || isQuickStarting) return;
+-    let cancelled = false;
+-
+-    const autoInit = async () => {
+-      setIsQuickStarting(true);
+-      setWorkspaceError(null);
+-      try {
+-        const params = new URLSearchParams(window.location.search);
+-        const seedParam = params.get("seed");
+-        const res = await initSession({
+-          seed: seedParam || "demo",
+-          candidate_name: "Ada Okafor",
+-        });
+-        if (!cancelled) {
+-          setSessionData(
+-            res,
+-            "Ada Okafor",
+-            seedParam === "demo" ? "demo" : undefined
+-          );
+-          startTimer();
+-        }
+-      } catch (err) {
+-        if (!cancelled) {
+-          setWorkspaceError(
+-            err instanceof Error
+-              ? err.message
+-              : "Failed to initialize workspace session."
+-          );
+-        }
+-      } finally {
+-        if (!cancelled) {
+-          setIsQuickStarting(false);
+-        }
+-      }
+-    };
+-
+-    autoInit();
+-    return () => {
+-      cancelled = true;
+-    };
+-  }, [isHydrated, session, isQuickStarting, setSessionData, startTimer]);
+-
+-  const handleQuickDemoInit = async () => {
+-    if (isQuickStarting) return;
+-    setIsQuickStarting(true);
+-    setWorkspaceError(null);
+-    try {
+-      const res = await initSession({
+-        seed: "demo",
+-        candidate_name: "Ada Okafor",
+-      });
+-      setSessionData(res, "Ada Okafor", urlSeedDemo ? "demo" : undefined);
+-      startTimer();
+-    } catch (err) {
+-      const msg =
+-        err instanceof Error
+-          ? err.message
+-          : "Failed to initialize demo session.";
+-      setWorkspaceError(msg);
+-      showToast(msg, "init_failed", "error");
+-    } finally {
+-      setIsQuickStarting(false);
++    if (isHydrated && !session && !leavingRef.current) {
++      goToStart();
+     }
+-  };
++  }, [isHydrated, session, goToStart]);
++
++  const handleQuickDemoInit = goToStart;
+ 
+   const handleNewSession = () => {
++    // Stay on the pinned demo dataset if that is what this session was using, so a
++    // presenter who resets between runs does not land on a different dataset.
++    const next = seed === "demo" || urlSeedDemo ? "/?seed=demo" : "/";
++    leavingRef.current = true;
+     resetSession();
+-    router.push("/");
++    router.push(next);
+   };
+ 
+   const selectAndFocusLeftTab = (nextKey: WorkspaceTabKey) => {
+@@ -287,7 +240,7 @@ export default function WorkspacePage() {
+                   No Active Reconciliation Session
+                 </h1>
+                 <p className="mt-1 text-xs leading-relaxed text-slate-600">
+-                  Start from the landing page or launch the default scenario.
++                  Returning you to the start screen to begin a session.
+                 </p>
+               </div>
+               <button
+@@ -295,7 +248,7 @@ export default function WorkspacePage() {
+                 onClick={handleQuickDemoInit}
+                 className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+               >
+-                <span>Launch Workspace</span>
++                <span>Go to Start Screen</span>
+               </button>
+             </div>
+           )}
+@@ -439,7 +392,7 @@ export default function WorkspacePage() {
+       </header>
+ 
+       {/* Two-Pane Workspace: Left (35%) Tabs Brief | Answer | Hints, Right (65%) DataViewer */}
+-      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[35%_65%]">
++      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(340px,30%)_minmax(0,1fr)]">
+         {/* Left Pane (35%): Tabs Brief | Answer | Hints */}
+         <div className="flex min-h-0 min-w-0 flex-col border-b border-slate-200 bg-white lg:border-r lg:border-b-0">
+           {/* Left Pane Tablist */}
+diff --git a/frontend/src/components/BadgeModal.tsx b/frontend/src/components/BadgeModal.tsx
+index 2ec5b6c..0b8549c 100644
+--- a/frontend/src/components/BadgeModal.tsx
++++ b/frontend/src/components/BadgeModal.tsx
+@@ -31,6 +31,7 @@ export default function BadgeModal() {
+   } = useSession();
+ 
+   const dialogRef = useRef<HTMLDialogElement | null>(null);
++  const verifyResultsRef = useRef<HTMLDivElement | null>(null);
+   const titleId = useId();
+   const rawCodeCaptionId = useId();
+ 
+@@ -112,6 +113,16 @@ export default function BadgeModal() {
+     };
+   }, [closeBadgeModal]);
+ 
++  // The verdict is the point of the demo: bring it into view instead of leaving it
++  // below the fold of the modal.
++  useEffect(() => {
++    if (!validVerifyResult && !tamperVerifyResult) return;
++    const id = window.requestAnimationFrame(() => {
++      verifyResultsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
++    });
++    return () => window.cancelAnimationFrame(id);
++  }, [validVerifyResult, tamperVerifyResult]);
++
+   // Reset verification results when a new badge is minted
+   useEffect(() => {
+     setValidVerifyResult(null);
+@@ -221,7 +232,7 @@ export default function BadgeModal() {
+           </span>
+           <div>
+             <span className="text-xs font-bold tracking-wider text-emerald-800 uppercase">
+-              Result Modal · Verifiable Credential Minted
++              Verifiable credential issued
+             </span>
+             <h2 id={titleId} className="text-base font-bold text-slate-900">
+               {badge.credentialSubject.achievement.name}
+@@ -361,7 +372,8 @@ export default function BadgeModal() {
+         {/* Live Verification & Side-by-Side Tamper Test Output */}
+         {(validVerifyResult || tamperVerifyResult) && (
+           <div
+-            className={`grid gap-4 ${
++            ref={verifyResultsRef}
++            className={`scroll-mt-4 grid gap-4 ${
+               validVerifyResult && tamperVerifyResult
+                 ? "grid-cols-1 md:grid-cols-2"
+                 : "grid-cols-1"
+@@ -378,7 +390,7 @@ export default function BadgeModal() {
+               <VerifyResult
+                 result={tamperVerifyResult}
+                 title="Tamper Test (Edited Payload)"
+-                subtitle={`Mutated candidateSubject.name → "${
++                subtitle={`Edited credentialSubject.name → "${
+                   tamperedNamePreview ??
+                   `${badge.credentialSubject.name} (edited)`
+                 }"`}
+diff --git a/frontend/src/components/DataViewer.tsx b/frontend/src/components/DataViewer.tsx
+index 9104324..9c352ae 100644
+--- a/frontend/src/components/DataViewer.tsx
++++ b/frontend/src/components/DataViewer.tsx
+@@ -261,7 +261,7 @@ export default function DataViewer({
+   return (
+     <section
+       aria-label="Source Datasets Viewer"
+-      className="flex h-full min-h-0 min-w-0 flex-col gap-4 bg-white p-6"
++      className="flex h-full min-h-0 min-w-0 flex-col gap-4 bg-white p-4"
+     >
+       {/* Top Toolbar: Dataset Tabs + Single Download Menu Control */}
+       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
+@@ -476,7 +476,7 @@ export default function DataViewer({
+                   <th
+                     key={col}
+                     scope="col"
+-                    className={`border-b border-slate-300 bg-slate-100 px-4 py-3 font-mono text-sm whitespace-nowrap ${
++                    className={`border-b border-slate-300 bg-slate-100 px-2.5 py-2.5 font-mono text-[13px] whitespace-nowrap ${
+                       colIdx === 0
+                         ? "sticky left-0 z-30 border-r border-slate-300 bg-slate-100 text-left shadow-[2px_0_4px_-2px_rgba(15,23,42,0.12)]"
+                         : NUMERIC_ALIGN_COLUMNS.has(col)
+@@ -545,7 +545,7 @@ export default function DataViewer({
+                             <th
+                               key={`${colName}-${cellIdx}`}
+                               scope="row"
+-                              className={`sticky left-0 z-10 border-r border-b border-slate-200 px-4 py-3 font-mono text-sm font-semibold whitespace-pre tabular-nums text-slate-900 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)] group-hover:bg-amber-50 ${
++                              className={`sticky left-0 z-10 border-r border-b border-slate-200 px-2.5 py-2.5 font-mono text-[13px] font-semibold whitespace-pre tabular-nums text-slate-900 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)] group-hover:bg-amber-50 ${
+                                 isEven ? "bg-slate-50" : "bg-white"
+                               }`}
+                             >
+@@ -557,7 +557,7 @@ export default function DataViewer({
+                         return (
+                           <td
+                             key={`${colName}-${cellIdx}`}
+-                            className={`border-b border-slate-200/70 px-4 py-3 text-sm whitespace-pre ${
++                            className={`border-b border-slate-200/70 px-2.5 py-2.5 text-[13px] whitespace-pre ${
+                               isMono
+                                 ? "font-mono tabular-nums text-slate-900"
+                                 : "text-slate-800"
+diff --git a/frontend/src/components/SubmissionForm.tsx b/frontend/src/components/SubmissionForm.tsx
+index a4f7644..689855b 100644
+--- a/frontend/src/components/SubmissionForm.tsx
++++ b/frontend/src/components/SubmissionForm.tsx
+@@ -112,6 +112,12 @@ export default function SubmissionForm() {
+             "info"
+           );
+           openBadgeModal();
++        } else if (err.status === 404 || err.code === "session_not_found") {
++          // The server restarted and this session no longer exists there.
++          const msg =
++            "This session has expired on the server. Click “New Session” at the top to start again — your tables will be regenerated.";
++          setSubmissionError(msg);
++          showToast(msg, "session_expired", "error");
+         } else {
+           setSubmissionError(err.message);
+           showToast(err.message, err.code, "error");
+@@ -263,7 +269,7 @@ export default function SubmissionForm() {
+             id={`${discrepancyId}-hint`}
+             className="text-xs text-slate-500"
+           >
+-            Whole Naira integer (e.g. 45,000 or ₦45,000)
++            Whole Naira amount, no kobo (₦ sign and commas are fine)
+           </span>
+           <input
+             id={discrepancyId}
+@@ -278,7 +284,7 @@ export default function SubmissionForm() {
+               setDiscrepancyNgn(e.target.value);
+               if (submissionError) setSubmissionError(null);
+             }}
+-            placeholder="e.g. 45,000"
++            placeholder="Amount in ₦"
+             aria-invalid={
+               discrepancyStatus === "incorrect" ||
+               discrepancyStatus === "invalid_format"
+@@ -326,7 +332,7 @@ export default function SubmissionForm() {
+               setMissingTxId(e.target.value);
+               if (submissionError) setSubmissionError(null);
+             }}
+-            placeholder="e.g. POS-1042"
++            placeholder="POS-…"
+             aria-invalid={missingTxStatus === "incorrect"}
+             aria-describedby={
+               missingTxStatus
+@@ -371,7 +377,7 @@ export default function SubmissionForm() {
+               setDuplicateWbId(e.target.value);
+               if (submissionError) setSubmissionError(null);
+             }}
+-            placeholder="e.g. WB-3311"
++            placeholder="WB-…"
+             aria-invalid={duplicateWbStatus === "incorrect"}
+             aria-describedby={
+               duplicateWbStatus
+diff --git a/frontend/src/components/TutorDrawer.tsx b/frontend/src/components/TutorDrawer.tsx
+index ca6a812..46360c6 100644
+--- a/frontend/src/components/TutorDrawer.tsx
++++ b/frontend/src/components/TutorDrawer.tsx
+@@ -186,11 +186,9 @@ export function HintsHistoryPanel() {
+                       Attempt #{item.attempt_no}
+                     </span>
+                   </div>
+-                  {isTemplate && (
+-                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+-                      offline hint
+-                    </span>
+-                  )}
++                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
++                    {isTemplate ? "offline hint" : "AI tutor"}
++                  </span>
+                 </div>
+ 
+                 <p className="text-sm leading-relaxed text-slate-800">
+@@ -429,7 +427,12 @@ export default function TutorDrawer() {
+                 <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                 Hint Level {latestHintAttempt.tutor_hint.level}
+               </span>
+-              <span className="font-mono text-xs text-slate-600">
++              <span className="flex items-center gap-2 font-mono text-xs text-slate-600">
++                <span className="rounded bg-white/80 px-2 py-0.5 font-sans text-xs font-medium text-slate-700 ring-1 ring-slate-200">
++                  {latestHintAttempt.tutor_hint.source === "llm"
++                    ? "AI tutor"
++                    : "offline hint"}
++                </span>
+                 Attempt #{latestHintAttempt.attempt_no}
+               </span>
+             </div>
+diff --git a/frontend/src/lib/api-error.ts b/frontend/src/lib/api-error.ts
+new file mode 100644
+index 0000000..83f8664
+--- /dev/null
++++ b/frontend/src/lib/api-error.ts
+@@ -0,0 +1,11 @@
++export class ApiError extends Error {
++  public readonly code: string;
++  public readonly status: number;
++
++  constructor(code: string, message: string, status = 400) {
++    super(message);
++    this.name = "ApiError";
++    this.code = code;
++    this.status = status;
++  }
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 9a9a373..a716028 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -19,6 +19,8 @@ export type VerifyReason =
+ export interface HealthResponse {
+   ok: boolean;
+   llm: "up" | "fallback";
++  /** Present only in fallback: why the last LLM call failed (or was not made). */
++  llm_reason?: string | null;
+ }
+ 
+ export interface ScenarioInfo {
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index b12d598..732eac7 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -1,10 +1,7 @@
+ import type {
+   ApiErrorResponse,
+   BadgeCredential,
+-  FieldStatus,
+-  FieldStatusMap,
+   HealthResponse,
+-  HintSource,
+   IssuerProfile,
+   SessionInitRequest,
+   SessionInitResponse,
+@@ -13,30 +10,25 @@ import type {
+   TableKey,
+   VerifyResponse,
+ } from "./api-types";
++import { ApiError } from "./api-error";
+ 
+-import initFixture from "../mocks/init.json";
+-import submitFailFixture from "../mocks/submit-fail.json";
+-import submitPassFixture from "../mocks/submit-pass.json";
+-import verifyValidFixture from "../mocks/verify-valid.json";
+-import verifyInvalidFixture from "../mocks/verify-invalid.json";
+-import issuerFixture from "../mocks/issuer.json";
+-
+-export class ApiError extends Error {
+-  public readonly code: string;
+-  public readonly status: number;
+-
+-  constructor(code: string, message: string, status = 400) {
+-    super(message);
+-    this.name = "ApiError";
+-    this.code = code;
+-    this.status = status;
+-  }
+-}
++export { ApiError };
+ 
++/**
++ * Mock mode is an explicit build-time switch for UI work without a backend. It is
++ * never entered automatically: if the real backend cannot be reached, the call fails
++ * with a visible error. Grading and credential verification only ever happen on the
++ * server.
++ */
+ export function isMockMode(): boolean {
+   return process.env.NEXT_PUBLIC_USE_MOCKS === "true";
+ }
+ 
++// Call sites test the env var literally (not through isMockMode()) so the bundler can
++// prove the branch dead in a real build and leave the fixtures, which contain the demo
++// answers, out of the shipped JavaScript entirely.
++const loadMock = () => import("./mock-api");
++
+ export function getApiBaseUrl(): string {
+   const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+   if (configured) {
+@@ -52,128 +44,6 @@ export function getApiBaseUrl(): string {
+   return "http://localhost:8000";
+ }
+ 
+-// Track mock session state in memory so demo loop in mock mode feels completely real
+-interface MockSessionState {
+-  candidateName: string;
+-  seed: string;
+-  startedAtMs: number;
+-  attemptsCount: number;
+-  hintsUsed: number;
+-  solved: boolean;
+-  issuedBadge: BadgeCredential | null;
+-}
+-
+-const mockSessions = new Map<string, MockSessionState>();
+-
+-function parseMockNaira(raw: string): number | null {
+-  let cleaned = raw.trim();
+-  if (!cleaned) return null;
+-  cleaned = cleaned.replace(/^(?:₦|NGN|N)\s*/i, "").replace(/,/g, "").trim();
+-  if (!/^\d+(?:\.\d+)?$/.test(cleaned)) {
+-    return null;
+-  }
+-  const num = Number(cleaned);
+-  if (!Number.isFinite(num) || num <= 0 || !Number.isInteger(num)) {
+-    return null;
+-  }
+-  return num;
+-}
+-
+-function normaliseId(raw: string): string {
+-  return raw.trim().toUpperCase();
+-}
+-
+-const HINT_LADDER: Record<
+-  number,
+-  {
+-    discrepancy: string;
+-    missing_tx: string;
+-    duplicate_wb: string;
+-    source: HintSource;
+-  }
+-> = {
+-  1: {
+-    discrepancy: "Which payment methods should reach the bank at all?",
+-    missing_tx: "Which table should every transfer show up in?",
+-    duplicate_wb: "Which table records physical stock moving?",
+-    source: "llm",
+-  },
+-  2: {
+-    discrepancy: "Compare transfer sales against credits, not all sales.",
+-    missing_tx: "Match on the customer reference, not the amount.",
+-    duplicate_wb: "Look for two rows that are the same delivery written differently.",
+-    source: "llm",
+-  },
+-  3: {
+-    discrepancy: "Check the dates in October; one transfer has no partner.",
+-    missing_tx: "Two transfers share an amount; only one is in the bank.",
+-    duplicate_wb: "Product names can be misspelled; normalise dates before comparing.",
+-    source: "template",
+-  },
+-};
+-
+-function buildMockTutorHint(
+-  level: number,
+-  fieldStatus: FieldStatusMap,
+-  submittedAmount: number | null,
+-  submittedTx: string,
+-  submittedWb: string
+-): { level: number; text: string; source: HintSource } {
+-  const clampedLevel = Math.min(Math.max(level, 1), 3);
+-
+-  // If the exact fail fixture scenario is matched on attempt 1, return the fixture hint text
+-  if (
+-    clampedLevel === 1 &&
+-    fieldStatus.discrepancy_ngn === "incorrect" &&
+-    fieldStatus.missing_tx_id === "incorrect" &&
+-    fieldStatus.duplicate_wb_id === "correct"
+-  ) {
+-    return {
+-      level: 1,
+-      text: submitFailFixture.tutor_hint.text,
+-      source: submitFailFixture.tutor_hint.source as HintSource,
+-    };
+-  }
+-
+-  const ladder = HINT_LADDER[clampedLevel] ?? HINT_LADDER[3];
+-  const parts: string[] = [];
+-
+-  if (fieldStatus.discrepancy_ngn !== "correct") {
+-    if (submittedAmount === 201500) {
+-      parts.push(
+-        "Cash transactions stay in the physical till and never reach the bank statement."
+-      );
+-    }
+-    parts.push(ladder.discrepancy);
+-  }
+-
+-  if (fieldStatus.missing_tx_id !== "correct") {
+-    if (submittedTx === "POS-1049") {
+-      parts.push(
+-        "That transaction shares the same Naira value, but check whether its customer_ref is already credited in bank_settlement.csv."
+-      );
+-    } else {
+-      parts.push(ladder.missing_tx);
+-    }
+-  }
+-
+-  if (fieldStatus.duplicate_wb_id !== "correct") {
+-    if (submittedWb === "WB-3307") {
+-      parts.push(
+-        "You found the original waybill row — remember the brief asks for the later-listed duplicate ID, not the original."
+-      );
+-    } else {
+-      parts.push(ladder.duplicate_wb);
+-    }
+-  }
+-
+-  return {
+-    level: clampedLevel,
+-    text: parts.slice(0, 2).join(" "),
+-    source: ladder.source,
+-  };
+-}
+-
+ async function parseResponse<T>(res: Response): Promise<T> {
+   let body: unknown = null;
+   try {
+@@ -214,34 +84,77 @@ async function parseResponse<T>(res: Response): Promise<T> {
+   return body as T;
+ }
+ 
+-export async function checkHealth(): Promise<HealthResponse> {
+-  if (isMockMode()) {
+-    return { ok: true, llm: "up" };
++const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
++
++/** Gateway statuses a sleeping or restarting host returns while it boots. */
++const WAKING_STATUSES = new Set([502, 503, 504]);
++
++interface RequestOptions {
++  /** Keep retrying network failures and 502/503/504 for this long. */
++  retryForMs: number;
++  /** Abort a single attempt after this long. */
++  attemptTimeoutMs?: number;
++}
++
++/**
++ * One call to the real backend. A free-tier host sleeps when idle and takes up to a
++ * minute to wake, so connection failures are retried for `retryForMs` before giving
++ * up with a clear `server_unreachable` error. There is deliberately no offline
++ * substitute.
++ */
++async function request<T>(
++  path: string,
++  init: RequestInit,
++  { retryForMs, attemptTimeoutMs = 75_000 }: RequestOptions
++): Promise<T> {
++  const startedAt = Date.now();
++  let delay = 1500;
++
++  for (;;) {
++    const controller = new AbortController();
++    const timer = setTimeout(() => controller.abort(), attemptTimeoutMs);
++    let res: Response | null = null;
++    try {
++      res = await fetch(`${getApiBaseUrl()}${path}`, {
++        ...init,
++        signal: controller.signal,
++      });
++    } catch {
++      res = null;
++    } finally {
++      clearTimeout(timer);
++    }
++
++    if (res && !WAKING_STATUSES.has(res.status)) {
++      return parseResponse<T>(res);
++    }
++
++    if (Date.now() - startedAt + delay > retryForMs) {
++      throw new ApiError(
++        "server_unreachable",
++        "Could not reach the ReconCore server. It may still be waking up — wait a few seconds and try again.",
++        res?.status ?? 0
++      );
++    }
++    await sleep(delay);
++    delay = Math.min(delay * 1.5, 6000);
+   }
+-  const res = await fetch(`${getApiBaseUrl()}/health`, {
+-    method: "GET",
+-    headers: { Accept: "application/json" },
+-  });
+-  return parseResponse<HealthResponse>(res);
+ }
+ 
+-function runMockInitSession(
+-  payload: SessionInitRequest,
+-  candidateName: string
+-): SessionInitResponse {
+-  const response: SessionInitResponse = structuredClone(
+-    initFixture
+-  ) as SessionInitResponse;
+-  mockSessions.set(response.session_id, {
+-    candidateName,
+-    seed: payload.seed || "demo",
+-    startedAtMs: Date.now(),
+-    attemptsCount: 0,
+-    hintsUsed: 0,
+-    solved: false,
+-    issuedBadge: null,
+-  });
+-  return response;
++const JSON_HEADERS = {
++  "Content-Type": "application/json",
++  Accept: "application/json",
++};
++
++export async function checkHealth(): Promise<HealthResponse> {
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
++    return { ok: true, llm: "fallback", llm_reason: "mock mode" };
++  }
++  return request<HealthResponse>(
++    "/health",
++    { method: "GET", headers: { Accept: "application/json" } },
++    { retryForMs: 0, attemptTimeoutMs: 20_000 }
++  );
+ }
+ 
+ export async function initSession(
+@@ -256,340 +169,85 @@ export async function initSession(
+     );
+   }
+ 
+-  if (isMockMode()) {
+-    return runMockInitSession(payload, candidateName);
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
++    return (await loadMock()).initSession(payload, candidateName);
+   }
+ 
+-  try {
+-    const res = await fetch(`${getApiBaseUrl()}/api/session/init`, {
++  return request<SessionInitResponse>(
++    "/api/session/init",
++    {
+       method: "POST",
+-      headers: {
+-        "Content-Type": "application/json",
+-        Accept: "application/json",
+-      },
++      headers: JSON_HEADERS,
+       body: JSON.stringify({
+         ...(payload.seed ? { seed: payload.seed } : {}),
+         candidate_name: candidateName,
+       }),
+-    });
+-    return await parseResponse<SessionInitResponse>(res);
+-  } catch (err) {
+-    if (err instanceof ApiError) {
+-      throw err;
+-    }
+-    return runMockInitSession(payload, candidateName);
+-  }
+-}
+-
+-function runMockSubmitAttempt(payload: SubmitRequest): SubmitResponse {
+-  let state = mockSessions.get(payload.session_id);
+-  if (!state) {
+-    state = {
+-      candidateName: "Ada Okafor",
+-      seed: "demo",
+-      startedAtMs: Date.now() - 412_000,
+-      attemptsCount: 0,
+-      hintsUsed: 0,
+-      solved: false,
+-      issuedBadge: null,
+-    };
+-    mockSessions.set(payload.session_id, state);
+-  }
+-
+-  if (state.solved) {
+-    throw new ApiError(
+-      "already_solved",
+-      "This reconciliation session has already been solved and its credential issued.",
+-      409
+-    );
+-  }
+-
+-  const idRegex = /^[A-Za-z0-9-]{1,20}$/;
+-  const txId = normaliseId(payload.missing_tx_id);
+-  const wbId = normaliseId(payload.duplicate_wb_id);
+-
+-  if (!idRegex.test(txId) || !idRegex.test(wbId)) {
+-    throw new ApiError(
+-      "invalid_input",
+-      "Transaction and waybill IDs must be 1–20 alphanumeric characters or hyphens (e.g. POS-1042, WB-3311).",
+-      422
+-    );
+-  }
+-
+-  const parsedAmount = parseMockNaira(payload.discrepancy_ngn);
+-  const amountStatus: FieldStatus =
+-    parsedAmount === null
+-      ? "invalid_format"
+-      : parsedAmount === 45000
+-        ? "correct"
+-        : "incorrect";
+-
+-  const txStatus: FieldStatus = txId === "POS-1042" ? "correct" : "incorrect";
+-  const wbStatus: FieldStatus = wbId === "WB-3311" ? "correct" : "incorrect";
+-
+-  const field_status: FieldStatusMap = {
+-    discrepancy_ngn: amountStatus,
+-    missing_tx_id: txStatus,
+-    duplicate_wb_id: wbStatus,
+-  };
+-
+-  // Per section 5.5: invalid_format is not counted as an attempt
+-  if (amountStatus === "invalid_format") {
+-    return {
+-      passed: false,
+-      attempt_no: state.attemptsCount,
+-      field_status,
+-      tutor_hint: {
+-        level: Math.max(state.hintsUsed, 1),
+-        text: "Enter the discrepancy as a whole Naira amount without kobo fractions (for example 45,000 or ₦45,000).",
+-        source: "template",
+-      },
+-      badge: null,
+-    };
+-  }
+-
+-  state.attemptsCount += 1;
+-  const allCorrect =
+-    amountStatus === "correct" &&
+-    txStatus === "correct" &&
+-    wbStatus === "correct";
+-
+-  if (allCorrect) {
+-    state.solved = true;
+-    const elapsedSeconds = Math.max(
+-      12,
+-      Math.round((Date.now() - state.startedAtMs) / 1000)
+-    );
+-    const secondsToSolve =
+-      state.attemptsCount === 2 && state.hintsUsed === 1 ? 412 : elapsedSeconds;
+-
+-    const passCopy = structuredClone(submitPassFixture) as SubmitResponse;
+-    passCopy.attempt_no = state.attemptsCount;
+-    passCopy.summary = {
+-      attempts: state.attemptsCount,
+-      hints_used: state.hintsUsed,
+-      seconds_to_solve: secondsToSolve,
+-    };
+-    if (passCopy.badge) {
+-      passCopy.badge.credentialSubject.name = state.candidateName;
+-      if (passCopy.badge.evidence?.[0]) {
+-        passCopy.badge.evidence[0]["reconcore:attempts"] = state.attemptsCount;
+-        passCopy.badge.evidence[0]["reconcore:hintsUsed"] = state.hintsUsed;
+-        passCopy.badge.evidence[0].description = `Solved in ${state.attemptsCount} ${
+-          state.attemptsCount === 1 ? "attempt" : "attempts"
+-        } with ${state.hintsUsed} ${
+-          state.hintsUsed === 1 ? "hint" : "hints"
+-        } in ${secondsToSolve} seconds.`;
+-      }
+-      state.issuedBadge = structuredClone(passCopy.badge);
+-    }
+-    return passCopy;
+-  }
+-
+-  state.hintsUsed = Math.min(state.hintsUsed + 1, 3);
+-  const hint = buildMockTutorHint(
+-    state.hintsUsed,
+-    field_status,
+-    parsedAmount,
+-    txId,
+-    wbId
++    },
++    // Long enough to ride out a cold start on a free-tier host.
++    { retryForMs: 90_000 }
+   );
+-
+-  return {
+-    passed: false,
+-    attempt_no: state.attemptsCount,
+-    field_status,
+-    tutor_hint: hint,
+-    badge: null,
+-  };
+ }
+ 
+ export async function submitAttempt(
+   payload: SubmitRequest
+ ): Promise<SubmitResponse> {
+-  if (isMockMode() || mockSessions.has(payload.session_id)) {
+-    return runMockSubmitAttempt(payload);
+-  }
+-
+-  try {
+-    const res = await fetch(`${getApiBaseUrl()}/api/session/submit`, {
+-      method: "POST",
+-      headers: {
+-        "Content-Type": "application/json",
+-        Accept: "application/json",
+-      },
+-      body: JSON.stringify(payload),
+-    });
+-    return await parseResponse<SubmitResponse>(res);
+-  } catch (err) {
+-    if (err instanceof ApiError) {
+-      throw err;
+-    }
+-    return runMockSubmitAttempt(payload);
+-  }
+-}
+-
+-function runMockVerifyBadge(
+-  badge: BadgeCredential | Record<string, unknown>
+-): VerifyResponse {
+-  const nowIso = new Date().toISOString();
+-  if (!badge || typeof badge !== "object" || Array.isArray(badge)) {
+-    return {
+-      valid: false,
+-      signature_verified: false,
+-      hash_match: false,
+-      issuer_match: false,
+-      reason: "malformed",
+-      checked_at: nowIso,
+-    };
+-  }
+-
+-  const candidate = badge as Partial<BadgeCredential>;
+-  if (
+-    !Array.isArray(candidate["@context"]) ||
+-    !candidate.issuer ||
+-    typeof candidate.issuer.id !== "string" ||
+-    !candidate.credentialSubject ||
+-    typeof candidate.credentialSubject.name !== "string" ||
+-    !candidate.proof ||
+-    typeof candidate.proof.proofValue !== "string" ||
+-    !Array.isArray(candidate.evidence) ||
+-    candidate.evidence.length === 0
+-  ) {
+-    return {
+-      valid: false,
+-      signature_verified: false,
+-      hash_match: false,
+-      issuer_match: false,
+-      reason: "malformed",
+-      checked_at: nowIso,
+-    };
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
++    return (await loadMock()).submitAttempt(payload);
+   }
+ 
+-  const expectedIssuerId = issuerFixture.id;
+-  const expectedHash = initFixture.dataset_hash;
+-  const expectedProofValue = submitPassFixture.badge.proof.proofValue;
+-
+-  const issuerMatch =
+-    candidate.issuer.id === expectedIssuerId &&
+-    candidate.proof.verificationMethod === issuerFixture.verification_method;
+-
+-  if (!issuerMatch) {
+-    return {
+-      valid: false,
+-      signature_verified: false,
+-      hash_match:
+-        candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash,
+-      issuer_match: false,
+-      reason: "issuer_unknown",
+-      checked_at: nowIso,
+-    };
+-  }
+-
+-  const hashMatch =
+-    candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash;
+-
+-  // Check if any signed field was tampered with
+-  const latestSession = Array.from(mockSessions.values()).pop();
+-  const expectedNames = new Set<string>([
+-    submitPassFixture.badge.credentialSubject.name,
+-    ...(latestSession?.issuedBadge
+-      ? [latestSession.issuedBadge.credentialSubject.name]
+-      : []),
+-    ...(latestSession?.candidateName ? [latestSession.candidateName] : []),
+-  ]);
+-
+-  const nameUntampered =
+-    expectedNames.has(candidate.credentialSubject.name) &&
+-    !candidate.credentialSubject.name.includes("(edited)");
+-
+-  const achievementUntampered =
+-    candidate.credentialSubject.achievement?.id ===
+-      submitPassFixture.badge.credentialSubject.achievement.id &&
+-    candidate.credentialSubject.achievement?.name ===
+-      submitPassFixture.badge.credentialSubject.achievement.name &&
+-    candidate.credentialSubject.result?.[0]?.value ===
+-      submitPassFixture.badge.credentialSubject.result[0].value;
+-
+-  const proofUntampered = candidate.proof.proofValue === expectedProofValue;
+-  const signatureVerified =
+-    nameUntampered && achievementUntampered && proofUntampered;
+-
+-  if (!signatureVerified) {
+-    return {
+-      ...(verifyInvalidFixture as VerifyResponse),
+-      signature_verified: false,
+-      hash_match: hashMatch,
+-      issuer_match: true,
+-      reason: "signature_invalid",
+-      checked_at: nowIso,
+-    };
+-  }
+-
+-  if (!hashMatch) {
+-    return {
+-      valid: false,
+-      signature_verified: true,
+-      hash_match: false,
+-      issuer_match: true,
+-      reason: "hash_unknown",
+-      checked_at: nowIso,
+-    };
+-  }
+-
+-  return {
+-    ...(verifyValidFixture as VerifyResponse),
+-    checked_at: nowIso,
+-  };
++  return request<SubmitResponse>(
++    "/api/session/submit",
++    { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(payload) },
++    { retryForMs: 45_000 }
++  );
+ }
+ 
+ export async function verifyBadge(
+   badge: BadgeCredential | Record<string, unknown>
+ ): Promise<VerifyResponse> {
+-  if (isMockMode()) {
+-    return runMockVerifyBadge(badge);
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
++    return (await loadMock()).verifyBadge(badge);
+   }
+ 
+-  try {
+-    const res = await fetch(`${getApiBaseUrl()}/api/credential/verify`, {
+-      method: "POST",
+-      headers: {
+-        "Content-Type": "application/json",
+-        Accept: "application/json",
+-      },
+-      body: JSON.stringify({ badge }),
+-    });
+-    return await parseResponse<VerifyResponse>(res);
+-  } catch (err) {
+-    if (err instanceof ApiError) {
+-      throw err;
+-    }
+-    return runMockVerifyBadge(badge);
+-  }
++  return request<VerifyResponse>(
++    "/api/credential/verify",
++    { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ badge }) },
++    { retryForMs: 60_000 }
++  );
+ }
+ 
+ export async function getIssuer(): Promise<IssuerProfile> {
+-  if (isMockMode()) {
+-    return structuredClone(issuerFixture) as IssuerProfile;
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
++    return (await loadMock()).getIssuer();
+   }
+ 
+-  try {
+-    const res = await fetch(`${getApiBaseUrl()}/api/issuer`, {
+-      method: "GET",
+-      headers: { Accept: "application/json" },
+-    });
+-    return await parseResponse<IssuerProfile>(res);
+-  } catch (err) {
+-    if (err instanceof ApiError) {
+-      throw err;
+-    }
+-    return structuredClone(issuerFixture) as IssuerProfile;
++  return request<IssuerProfile>(
++    "/api/issuer",
++    { method: "GET", headers: { Accept: "application/json" } },
++    { retryForMs: 60_000 }
++  );
++}
++
++/**
++ * A specimen credential for the employer verifier. From the real backend it is
++ * genuinely signed with the live issuer key, so it verifies for real and any edit to
++ * it fails for real.
++ */
++export async function getSampleCredential(): Promise<BadgeCredential> {
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
++    return (await loadMock()).sampleCredential();
+   }
++
++  return request<BadgeCredential>(
++    "/api/credential/sample",
++    { method: "GET", headers: { Accept: "application/json" } },
++    { retryForMs: 60_000 }
++  );
+ }
+ 
+ export function csvZipUrl(sessionId: string): string {
+   const encodedId = encodeURIComponent(sessionId);
+-  if (isMockMode() || mockSessions.has(sessionId)) {
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
+     return `/api/session/${encodedId}/csv.zip`;
+   }
+   return `${getApiBaseUrl()}/api/session/${encodedId}/csv.zip`;
+@@ -597,9 +255,8 @@ export function csvZipUrl(sessionId: string): string {
+ 
+ export function csvTableUrl(sessionId: string, table: TableKey): string {
+   const encodedId = encodeURIComponent(sessionId);
+-  if (isMockMode() || mockSessions.has(sessionId)) {
++  if (process.env.NEXT_PUBLIC_USE_MOCKS === "true") {
+     return `/api/session/${encodedId}/csv/${table}`;
+   }
+   return `${getApiBaseUrl()}/api/session/${encodedId}/csv/${table}`;
+ }
+-
+diff --git a/frontend/src/lib/mock-api.ts b/frontend/src/lib/mock-api.ts
+new file mode 100644
+index 0000000..1ddc1ab
+--- /dev/null
++++ b/frontend/src/lib/mock-api.ts
+@@ -0,0 +1,433 @@
++/**
++ * Mock backend for local UI work only.
++ *
++ * This module is loaded exclusively when NEXT_PUBLIC_USE_MOCKS=true. It is never used
++ * as a fallback for a real backend that is slow or unreachable: grading and
++ * verification done here are simulations (string comparisons against fixtures), so
++ * presenting them as real results would misrepresent the product. Every hint it
++ * returns is labelled "template" because no model is involved.
++ */
++import type {
++  BadgeCredential,
++  FieldStatus,
++  FieldStatusMap,
++  HintSource,
++  IssuerProfile,
++  SessionInitRequest,
++  SessionInitResponse,
++  SubmitRequest,
++  SubmitResponse,
++  VerifyResponse,
++} from "./api-types";
++import { ApiError } from "./api-error";
++
++import initFixture from "../mocks/init.json";
++import submitFailFixture from "../mocks/submit-fail.json";
++import submitPassFixture from "../mocks/submit-pass.json";
++import verifyValidFixture from "../mocks/verify-valid.json";
++import verifyInvalidFixture from "../mocks/verify-invalid.json";
++import issuerFixture from "../mocks/issuer.json";
++
++// Track mock session state in memory so demo loop in mock mode feels completely real
++interface MockSessionState {
++  candidateName: string;
++  seed: string;
++  startedAtMs: number;
++  attemptsCount: number;
++  hintsUsed: number;
++  solved: boolean;
++  issuedBadge: BadgeCredential | null;
++}
++
++const mockSessions = new Map<string, MockSessionState>();
++
++function parseMockNaira(raw: string): number | null {
++  let cleaned = raw.trim();
++  if (!cleaned) return null;
++  cleaned = cleaned.replace(/^(?:₦|NGN|N)\s*/i, "").replace(/,/g, "").trim();
++  if (!/^\d+(?:\.\d+)?$/.test(cleaned)) {
++    return null;
++  }
++  const num = Number(cleaned);
++  if (!Number.isFinite(num) || num <= 0 || !Number.isInteger(num)) {
++    return null;
++  }
++  return num;
++}
++
++function normaliseId(raw: string): string {
++  return raw.trim().toUpperCase();
++}
++
++const HINT_LADDER: Record<
++  number,
++  {
++    discrepancy: string;
++    missing_tx: string;
++    duplicate_wb: string;
++    source: HintSource;
++  }
++> = {
++  1: {
++    discrepancy: "Which payment methods should reach the bank at all?",
++    missing_tx: "Which table should every transfer show up in?",
++    duplicate_wb: "Which table records physical stock moving?",
++    source: "template",
++  },
++  2: {
++    discrepancy: "Compare transfer sales against credits, not all sales.",
++    missing_tx: "Match on the customer reference, not the amount.",
++    duplicate_wb: "Look for two rows that are the same delivery written differently.",
++    source: "template",
++  },
++  3: {
++    discrepancy: "Check the dates in October; one transfer has no partner.",
++    missing_tx: "Two transfers share an amount; only one is in the bank.",
++    duplicate_wb: "Product names can be misspelled; normalise dates before comparing.",
++    source: "template",
++  },
++};
++
++function buildMockTutorHint(
++  level: number,
++  fieldStatus: FieldStatusMap,
++  submittedAmount: number | null,
++  submittedTx: string,
++  submittedWb: string
++): { level: number; text: string; source: HintSource } {
++  const clampedLevel = Math.min(Math.max(level, 1), 3);
++
++  // If the exact fail fixture scenario is matched on attempt 1, return the fixture hint text
++  if (
++    clampedLevel === 1 &&
++    fieldStatus.discrepancy_ngn === "incorrect" &&
++    fieldStatus.missing_tx_id === "incorrect" &&
++    fieldStatus.duplicate_wb_id === "correct"
++  ) {
++    return {
++      level: 1,
++      text: submitFailFixture.tutor_hint.text,
++      source: "template" as HintSource,
++    };
++  }
++
++  const ladder = HINT_LADDER[clampedLevel] ?? HINT_LADDER[3];
++  const parts: string[] = [];
++
++  if (fieldStatus.discrepancy_ngn !== "correct") {
++    if (submittedAmount === 201500) {
++      parts.push(
++        "Cash transactions stay in the physical till and never reach the bank statement."
++      );
++    }
++    parts.push(ladder.discrepancy);
++  }
++
++  if (fieldStatus.missing_tx_id !== "correct") {
++    if (submittedTx === "POS-1049") {
++      parts.push(
++        "That transaction shares the same Naira value, but check whether its customer_ref is already credited in bank_settlement.csv."
++      );
++    } else {
++      parts.push(ladder.missing_tx);
++    }
++  }
++
++  if (fieldStatus.duplicate_wb_id !== "correct") {
++    if (submittedWb === "WB-3307") {
++      parts.push(
++        "You found the original waybill row — remember the brief asks for the later-listed duplicate ID, not the original."
++      );
++    } else {
++      parts.push(ladder.duplicate_wb);
++    }
++  }
++
++  return {
++    level: clampedLevel,
++    text: parts.slice(0, 2).join(" "),
++    source: ladder.source,
++  };
++}
++
++function runMockInitSession(
++  payload: SessionInitRequest,
++  candidateName: string
++): SessionInitResponse {
++  const response: SessionInitResponse = structuredClone(
++    initFixture
++  ) as SessionInitResponse;
++  mockSessions.set(response.session_id, {
++    candidateName,
++    seed: payload.seed || "demo",
++    startedAtMs: Date.now(),
++    attemptsCount: 0,
++    hintsUsed: 0,
++    solved: false,
++    issuedBadge: null,
++  });
++  return response;
++}
++
++function runMockSubmitAttempt(payload: SubmitRequest): SubmitResponse {
++  let state = mockSessions.get(payload.session_id);
++  if (!state) {
++    state = {
++      candidateName: "Ada Okafor",
++      seed: "demo",
++      startedAtMs: Date.now() - 412_000,
++      attemptsCount: 0,
++      hintsUsed: 0,
++      solved: false,
++      issuedBadge: null,
++    };
++    mockSessions.set(payload.session_id, state);
++  }
++
++  if (state.solved) {
++    throw new ApiError(
++      "already_solved",
++      "This reconciliation session has already been solved and its credential issued.",
++      409
++    );
++  }
++
++  const idRegex = /^[A-Za-z0-9-]{1,20}$/;
++  const txId = normaliseId(payload.missing_tx_id);
++  const wbId = normaliseId(payload.duplicate_wb_id);
++
++  if (!idRegex.test(txId) || !idRegex.test(wbId)) {
++    throw new ApiError(
++      "invalid_input",
++      "Transaction and waybill IDs must be 1–20 letters, digits or hyphens, copied exactly as they appear in the tables.",
++      422
++    );
++  }
++
++  const parsedAmount = parseMockNaira(payload.discrepancy_ngn);
++  const amountStatus: FieldStatus =
++    parsedAmount === null
++      ? "invalid_format"
++      : parsedAmount === 45000
++        ? "correct"
++        : "incorrect";
++
++  const txStatus: FieldStatus = txId === "POS-1042" ? "correct" : "incorrect";
++  const wbStatus: FieldStatus = wbId === "WB-3311" ? "correct" : "incorrect";
++
++  const field_status: FieldStatusMap = {
++    discrepancy_ngn: amountStatus,
++    missing_tx_id: txStatus,
++    duplicate_wb_id: wbStatus,
++  };
++
++  // Per section 5.5: invalid_format is not counted as an attempt
++  if (amountStatus === "invalid_format") {
++    return {
++      passed: false,
++      attempt_no: state.attemptsCount,
++      field_status,
++      tutor_hint: {
++        level: Math.max(state.hintsUsed, 1),
++        text: "Enter the discrepancy as a whole Naira amount without kobo fractions (a ₦ sign and commas are fine).",
++        source: "template",
++      },
++      badge: null,
++    };
++  }
++
++  state.attemptsCount += 1;
++  const allCorrect =
++    amountStatus === "correct" &&
++    txStatus === "correct" &&
++    wbStatus === "correct";
++
++  if (allCorrect) {
++    state.solved = true;
++    const elapsedSeconds = Math.max(
++      12,
++      Math.round((Date.now() - state.startedAtMs) / 1000)
++    );
++    const secondsToSolve =
++      state.attemptsCount === 2 && state.hintsUsed === 1 ? 412 : elapsedSeconds;
++
++    const passCopy = structuredClone(submitPassFixture) as SubmitResponse;
++    passCopy.attempt_no = state.attemptsCount;
++    passCopy.summary = {
++      attempts: state.attemptsCount,
++      hints_used: state.hintsUsed,
++      seconds_to_solve: secondsToSolve,
++    };
++    if (passCopy.badge) {
++      passCopy.badge.credentialSubject.name = state.candidateName;
++      if (passCopy.badge.evidence?.[0]) {
++        passCopy.badge.evidence[0]["reconcore:attempts"] = state.attemptsCount;
++        passCopy.badge.evidence[0]["reconcore:hintsUsed"] = state.hintsUsed;
++        passCopy.badge.evidence[0].description = `Solved in ${state.attemptsCount} ${
++          state.attemptsCount === 1 ? "attempt" : "attempts"
++        } with ${state.hintsUsed} ${
++          state.hintsUsed === 1 ? "hint" : "hints"
++        } in ${secondsToSolve} seconds.`;
++      }
++      state.issuedBadge = structuredClone(passCopy.badge);
++    }
++    return passCopy;
++  }
++
++  state.hintsUsed = Math.min(state.hintsUsed + 1, 3);
++  const hint = buildMockTutorHint(
++    state.hintsUsed,
++    field_status,
++    parsedAmount,
++    txId,
++    wbId
++  );
++
++  return {
++    passed: false,
++    attempt_no: state.attemptsCount,
++    field_status,
++    tutor_hint: hint,
++    badge: null,
++  };
++}
++
++function runMockVerifyBadge(
++  badge: BadgeCredential | Record<string, unknown>
++): VerifyResponse {
++  const nowIso = new Date().toISOString();
++  if (!badge || typeof badge !== "object" || Array.isArray(badge)) {
++    return {
++      valid: false,
++      signature_verified: false,
++      hash_match: false,
++      issuer_match: false,
++      reason: "malformed",
++      checked_at: nowIso,
++    };
++  }
++
++  const candidate = badge as Partial<BadgeCredential>;
++  if (
++    !Array.isArray(candidate["@context"]) ||
++    !candidate.issuer ||
++    typeof candidate.issuer.id !== "string" ||
++    !candidate.credentialSubject ||
++    typeof candidate.credentialSubject.name !== "string" ||
++    !candidate.proof ||
++    typeof candidate.proof.proofValue !== "string" ||
++    !Array.isArray(candidate.evidence) ||
++    candidate.evidence.length === 0
++  ) {
++    return {
++      valid: false,
++      signature_verified: false,
++      hash_match: false,
++      issuer_match: false,
++      reason: "malformed",
++      checked_at: nowIso,
++    };
++  }
++
++  const expectedIssuerId = issuerFixture.id;
++  const expectedHash = initFixture.dataset_hash;
++  const expectedProofValue = submitPassFixture.badge.proof.proofValue;
++
++  const issuerMatch =
++    candidate.issuer.id === expectedIssuerId &&
++    candidate.proof.verificationMethod === issuerFixture.verification_method;
++
++  if (!issuerMatch) {
++    return {
++      valid: false,
++      signature_verified: false,
++      hash_match:
++        candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash,
++      issuer_match: false,
++      reason: "issuer_unknown",
++      checked_at: nowIso,
++    };
++  }
++
++  const hashMatch =
++    candidate.evidence[0]?.["reconcore:datasetHash"] === expectedHash;
++
++  // Check if any signed field was tampered with
++  const latestSession = Array.from(mockSessions.values()).pop();
++  const expectedNames = new Set<string>([
++    submitPassFixture.badge.credentialSubject.name,
++    ...(latestSession?.issuedBadge
++      ? [latestSession.issuedBadge.credentialSubject.name]
++      : []),
++    ...(latestSession?.candidateName ? [latestSession.candidateName] : []),
++  ]);
++
++  const nameUntampered =
++    expectedNames.has(candidate.credentialSubject.name) &&
++    !candidate.credentialSubject.name.includes("(edited)");
++
++  const achievementUntampered =
++    candidate.credentialSubject.achievement?.id ===
++      submitPassFixture.badge.credentialSubject.achievement.id &&
++    candidate.credentialSubject.achievement?.name ===
++      submitPassFixture.badge.credentialSubject.achievement.name &&
++    candidate.credentialSubject.result?.[0]?.value ===
++      submitPassFixture.badge.credentialSubject.result[0].value;
++
++  const proofUntampered = candidate.proof.proofValue === expectedProofValue;
++  const signatureVerified =
++    nameUntampered && achievementUntampered && proofUntampered;
++
++  if (!signatureVerified) {
++    return {
++      ...(verifyInvalidFixture as VerifyResponse),
++      signature_verified: false,
++      hash_match: hashMatch,
++      issuer_match: true,
++      reason: "signature_invalid",
++      checked_at: nowIso,
++    };
++  }
++
++  if (!hashMatch) {
++    return {
++      valid: false,
++      signature_verified: true,
++      hash_match: false,
++      issuer_match: true,
++      reason: "hash_unknown",
++      checked_at: nowIso,
++    };
++  }
++
++  return {
++    ...(verifyValidFixture as VerifyResponse),
++    checked_at: nowIso,
++  };
++}
++
++
++export function initSession(
++  payload: SessionInitRequest,
++  candidateName: string
++): SessionInitResponse {
++  return runMockInitSession(payload, candidateName);
++}
++
++export function submitAttempt(payload: SubmitRequest): SubmitResponse {
++  return runMockSubmitAttempt(payload);
++}
++
++export function verifyBadge(
++  badge: BadgeCredential | Record<string, unknown>
++): VerifyResponse {
++  return runMockVerifyBadge(badge);
++}
++
++export function getIssuer(): IssuerProfile {
++  return structuredClone(issuerFixture) as IssuerProfile;
++}
++
++export function sampleCredential(): BadgeCredential {
++  return structuredClone(submitPassFixture.badge) as unknown as BadgeCredential;
++}
+diff --git a/frontend/src/lib/session-context.tsx b/frontend/src/lib/session-context.tsx
+index b360256..5ad5185 100644
+--- a/frontend/src/lib/session-context.tsx
++++ b/frontend/src/lib/session-context.tsx
+@@ -16,6 +16,7 @@ import type {
+   SubmitResponse,
+   TutorHint,
+ } from "./api-types";
++import { checkHealth, isMockMode } from "./api";
+ 
+ export interface AttemptRecord {
+   attempt_no: number;
+@@ -173,6 +174,21 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
+     checkedTasks,
+   ]);
+ 
++  // Keep the server awake while a candidate is working. A free-tier host sleeps after
++  // ~15 idle minutes and forgets its sessions when it restarts, which would strand
++  // someone who is quietly reading the tables.
++  const activeSessionId = session?.session_id ?? null;
++  useEffect(() => {
++    if (!activeSessionId || badge || isMockMode()) return;
++    const ping = () => {
++      checkHealth().catch(() => {
++        // Best effort only; a real request will surface any outage.
++      });
++    };
++    const interval = window.setInterval(ping, 4 * 60 * 1000);
++    return () => window.clearInterval(interval);
++  }, [activeSessionId, badge]);
++
+   // Tick elapsed timer once started until solved
+   useEffect(() => {
+     if (!timerStartedAt) {
+diff --git a/frontend/src/mocks/init.json b/frontend/src/mocks/init.json
+index af59585..b3a7c14 100644
+--- a/frontend/src/mocks/init.json
++++ b/frontend/src/mocks/init.json
+@@ -9,7 +9,7 @@
+     "body_markdown": "Welcome to the Alimosho Q3 audit desk. Before we close the October books for head office, our external auditors flagged two operational anomalies across our cashier point-of-sale logs, warehouse dispatch waybills, and GTBank settlement statement.\n\nFirst, one customer transfer logged at the till never settled into our GTBank corporate account. Remember that **Cash** and **POS Card** sales are reconciled through a separate physical till and processor ledger—they never appear in the bank transfer statement. Be careful: more than one transfer may share the same Naira value, so verify each transfer using its unique `customer_ref` inside the bank narration.\n\nSecond, a warehouse clerk accidentally logged the same stock delivery twice under two different waybill IDs, introducing a slight product-name typo and a different date format on the second entry. Report the ID of the duplicate entry, not the original.\n\ndiscrepancy_ngn = sum(POS sales paid by Transfer) − sum(bank credits). The duplicate waybill is graded only by its ID.",
+     "task_definitions": [
+       "discrepancy_ngn = sum(POS sales paid by Transfer) − sum(bank credits). The duplicate waybill is graded only by its ID.",
+-      "Cash and POS Card sales never appear in the bank table — only Transfer sales settle into bank_settlement.csv.",
++      "Report the tx_id of the Transfer sale that has no matching bank credit. Match each transfer by its customer_ref inside the bank narration, not by its amount. Cash and POS Card sales never appear in bank_settlement.csv.",
+       "Report the ID of the duplicate waybill entry (the second, later-listed copy with the typo), not the original."
+     ]
+   },
+diff --git a/frontend/src/mocks/submit-fail.json b/frontend/src/mocks/submit-fail.json
+index 13e25af..01a5406 100644
+--- a/frontend/src/mocks/submit-fail.json
++++ b/frontend/src/mocks/submit-fail.json
+@@ -9,8 +9,7 @@
+   "tutor_hint": {
+     "level": 1,
+     "text": "Which payment methods should ever reach the bank statement? Also check whether you matched the transfer by its customer reference rather than its amount.",
+-    "source": "llm"
++    "source": "template"
+   },
+   "badge": null
+ }
+-
+diff --git a/netlify.toml b/netlify.toml
+index e5aa7a0..94b1bb7 100644
+--- a/netlify.toml
++++ b/netlify.toml
+@@ -1,7 +1,8 @@
+ [build]
+   base = "frontend"
+   command = "npm run build"
+-  publish = "frontend/out"
++  # Resolved relative to `base`, so this is frontend/out.
++  publish = "out"
+ 
+ [build.environment]
+   NODE_VERSION = "20"
+diff --git a/render.yaml b/render.yaml
+index 393c52a..a6c0aa6 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -24,10 +24,9 @@ services:
+         sync: false
+ 
+       # --- frontend origins ---------------------------------------------------
+-      # Replace <your-project> with the real Vercel project name. Include every
+-      # origin that will call this API; no trailing slashes.
++      # Every origin that will call this API, exact, no trailing slashes.
+       - key: CORS_ORIGINS
+-        value: https://reconcore-app.netlify.app,https://<your-project>.vercel.app,http://localhost:3000
++        value: https://reconcore-app.netlify.app,http://localhost:3000
+ 
+       - key: PUBLIC_BASE_URL
+         value: https://reconcore-api.onrender.com
+@@ -42,7 +41,7 @@ services:
+       # --- LLM (optional) -----------------------------------------------------
+       # Primary: Meta Model API (Muse Spark), OpenAI-compatible chat completions.
+       # With no key the backend serves the template brief and template hints, and
+-      # /health reports {"llm":"fallback"}. Nothing else changes.
++      # /health reports {"llm":"fallback","llm_reason":"..."}. Nothing else changes.
+       - key: LLM_MODEL
+         value: openai/muse-spark-1.1
+       - key: LLM_API_BASE
+@@ -51,8 +50,13 @@ services:
+         sync: false
+       - key: LLM_REASONING_EFFORT
+         value: minimal
++      # Muse Spark reasons before it answers; hints take several seconds. Do not set
++      # this below ~15 or every hint silently becomes a template.
+       - key: LLM_TIMEOUT_S
+-        value: "5"
++        value: "20"
++      # 0 = send no max_tokens. Reasoning tokens count against a cap and starve the reply.
++      - key: LLM_MAX_TOKENS
++        value: "0"
+ 
+       # Optional second chance before the templates take over. Leave the model blank
+       # to disable the fallback entirely.

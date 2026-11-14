@@ -94,3 +94,20 @@ See [../README.md](../README.md) for the full deploy steps and env tables, and
 - Hosted instances have an ephemeral filesystem, so the `badges` table can vanish on a
   restart. Verification therefore re-derives the dataset from the credential's own seed
   rather than depending on a database row (the signature already proves issuance).
+
+## Rules added after the finale audit (do not regress)
+
+- The frontend never substitutes mock data for a real backend that is slow or down.
+  Mock mode is `NEXT_PUBLIC_USE_MOCKS=true` only. Grading and verification happen on the
+  server or not at all; a network failure is retried, then shown as an error.
+- No real answer may appear in UI copy: placeholders, helper text, error messages and
+  the landing preview image use neutral text, never demo-seed values.
+- Sessions are never created under a placeholder name. `/briefing` and `/workspace`
+  opened without a session redirect to the start screen.
+- LLM calls send no `max_tokens` (unless `LLM_MAX_TOKENS` > 0) and no `temperature`:
+  Muse Spark is a reasoning model and a small cap returns an empty reply. Keep
+  `LLM_TIMEOUT_S` at 15 or more. `/health` carries `llm_reason` when in fallback.
+- `/api/session/init` never calls a model. The LLM brief is written once at startup
+  (`prewarm_llm_brief`) and reused for every seed.
+- Template hints take the grader's diagnostics, so the offline tutor still addresses the
+  recognised mistake (cash included, decoy transfer, original waybill).

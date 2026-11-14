@@ -23,7 +23,6 @@ def llm_brief_body() -> str | None:
             {"role": "system", "content": BRIEF_SYSTEM},
             {"role": "user", "content": BRIEF_USER},
         ],
-        max_tokens=420,
     )
     if reply is None:
         return None

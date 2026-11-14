@@ -9,7 +9,7 @@
     "body_markdown": "Welcome to the Alimosho Q3 audit desk. Before we close the October books for head office, our external auditors flagged two operational anomalies across our cashier point-of-sale logs, warehouse dispatch waybills, and GTBank settlement statement.\n\nFirst, one customer transfer logged at the till never settled into our GTBank corporate account. Remember that **Cash** and **POS Card** sales are reconciled through a separate physical till and processor ledger—they never appear in the bank transfer statement. Be careful: more than one transfer may share the same Naira value, so verify each transfer using its unique `customer_ref` inside the bank narration.\n\nSecond, a warehouse clerk accidentally logged the same stock delivery twice under two different waybill IDs, introducing a slight product-name typo and a different date format on the second entry. Report the ID of the duplicate entry, not the original.\n\ndiscrepancy_ngn = sum(POS sales paid by Transfer) − sum(bank credits). The duplicate waybill is graded only by its ID.",
     "task_definitions": [
       "discrepancy_ngn = sum(POS sales paid by Transfer) − sum(bank credits). The duplicate waybill is graded only by its ID.",
-      "Cash and POS Card sales never appear in the bank table — only Transfer sales settle into bank_settlement.csv.",
+      "Report the tx_id of the Transfer sale that has no matching bank credit. Match each transfer by its customer_ref inside the bank narration, not by its amount. Cash and POS Card sales never appear in bank_settlement.csv.",
       "Report the ID of the duplicate waybill entry (the second, later-listed copy with the typo), not the original."
     ]
   },

@@ -1,0 +1,51 @@
+# Render blueprint for the ReconCore backend.
+# Render -> New -> Blueprint -> point at this repo. Secrets marked sync: false are
+# entered in the dashboard, never committed.
+services:
+  - type: web
+    name: reconcore-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+      # Generate once with: python3 scripts/generate_issuer_key.py
+      # Never change it: a new key invalidates every badge already issued.
+      - key: ISSUER_PRIVATE_KEY_B64
+        sync: false
+
+      # Every origin that calls this API, exact, no trailing slashes.
+      - key: CORS_ORIGINS
+        value: https://reconcore-app.netlify.app,http://localhost:3000
+
+      - key: PUBLIC_BASE_URL
+        value: https://reconcore-api.onrender.com
+
+      # Free instances have an ephemeral disk. Badges still verify after a restart
+      # because verification re-derives the dataset from the credential's seed.
+      - key: DB_PATH
+        value: /tmp/reconcore.db
+
+      # LLM: Meta Model API (Muse Spark). With no key, template hints are served and
+      # /health reports {"llm":"fallback","llm_reason":"..."}.
+      - key: LLM_MODEL
+        value: openai/muse-spark-1.1
+      - key: LLM_API_BASE
+        value: https://api.meta.ai/v1
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_REASONING_EFFORT
+        value: minimal
+      # Muse reasons before answering. Below ~15 every hint becomes a template.
+      - key: LLM_TIMEOUT_S
+        value: "20"
+      # 0 = send no max_tokens. Reasoning tokens count against a cap and starve the reply.
+      - key: LLM_MAX_TOKENS
+        value: "0"

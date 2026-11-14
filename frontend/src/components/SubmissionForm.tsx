@@ -112,6 +112,12 @@ export default function SubmissionForm() {
             "info"
           );
           openBadgeModal();
+        } else if (err.status === 404 || err.code === "session_not_found") {
+          // The server restarted and this session no longer exists there.
+          const msg =
+            "This session has expired on the server. Click “New Session” at the top to start again — your tables will be regenerated.";
+          setSubmissionError(msg);
+          showToast(msg, "session_expired", "error");
         } else {
           setSubmissionError(err.message);
           showToast(err.message, err.code, "error");
@@ -263,7 +269,7 @@ export default function SubmissionForm() {
             id={`${discrepancyId}-hint`}
             className="text-xs text-slate-500"
           >
-            Whole Naira integer (e.g. 45,000 or ₦45,000)
+            Whole Naira amount, no kobo (₦ sign and commas are fine)
           </span>
           <input
             id={discrepancyId}
@@ -278,7 +284,7 @@ export default function SubmissionForm() {
               setDiscrepancyNgn(e.target.value);
               if (submissionError) setSubmissionError(null);
             }}
-            placeholder="e.g. 45,000"
+            placeholder="Amount in ₦"
             aria-invalid={
               discrepancyStatus === "incorrect" ||
               discrepancyStatus === "invalid_format"
@@ -326,7 +332,7 @@ export default function SubmissionForm() {
               setMissingTxId(e.target.value);
               if (submissionError) setSubmissionError(null);
             }}
-            placeholder="e.g. POS-1042"
+            placeholder="POS-…"
             aria-invalid={missingTxStatus === "incorrect"}
             aria-describedby={
               missingTxStatus
@@ -371,7 +377,7 @@ export default function SubmissionForm() {
               setDuplicateWbId(e.target.value);
               if (submissionError) setSubmissionError(null);
             }}
-            placeholder="e.g. WB-3311"
+            placeholder="WB-…"
             aria-invalid={duplicateWbStatus === "incorrect"}
             aria-describedby={
               duplicateWbStatus

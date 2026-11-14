@@ -73,7 +73,9 @@ export default function StartScreenPage() {
     try {
       const initResponse = await initSession({
         candidate_name: trimmedName,
-        seed: urlSeed ?? "demo",
+        // Only ?seed=demo pins the dataset. Everyone else gets a fresh, unique
+        // dataset from the server, so answers cannot be shared between candidates.
+        seed: urlSeed ?? undefined,
       });
       setSessionData(initResponse, trimmedName, urlSeed ?? undefined);
       router.push("/briefing");
@@ -347,8 +349,9 @@ export default function StartScreenPage() {
                       </p>
                       {isWakingServer && (
                         <p className="mt-1 text-amber-800">
-                          Cold-starting the backend instance — this can take
-                          30–50 seconds on first load.
+                          The server sleeps when idle and is starting up. This
+                          can take up to a minute on first load — please keep
+                          this tab open.
                         </p>
                       )}
                     </div>

@@ -21,10 +21,13 @@ DISCREPANCY_DEFINITION = (
     "The duplicate waybill is graded only by its ID."
 )
 
+# One line per task, in the order the UI lists them (discrepancy, missing transaction,
+# duplicate waybill).
 TASK_DEFINITIONS = [
     DISCREPANCY_DEFINITION,
-    "Cash and POS Card sales never appear in the bank table — only Transfer sales "
-    "settle into bank_settlement.csv.",
+    "Report the tx_id of the Transfer sale that has no matching bank credit. Match each "
+    "transfer by its customer_ref inside the bank narration, not by its amount. Cash and "
+    "POS Card sales never appear in bank_settlement.csv.",
     "Report the ID of the duplicate waybill entry (the second, later-listed copy with "
     "the typo), not the original.",
 ]
@@ -77,20 +80,63 @@ def _cache_brief(seed: str, brief: BriefInfo) -> None:
         )
 
 
+# The LLM-written body carries no seed-specific fact, so it is written once per process
+# (at startup, off the request path) and reused for every seed. `/api/session/init`
+# never waits on a model.
+LLM_BODY_KEY = "__llm_body__"
+
+
+def _cached_llm_body() -> str | None:
+    with db() as conn:
+        row = conn.execute(
+            "SELECT brief_json FROM brief_cache WHERE seed = ?", (LLM_BODY_KEY,)
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        body = json.loads(row["brief_json"]).get("body")
+    except Exception:  # pragma: no cover - corrupt cache row
+        return None
+    return body if isinstance(body, str) and body.strip() else None
+
+
+def prewarm_llm_brief() -> bool:
+    """Ask the LLM for the manager's message once and keep it. Safe to call repeatedly;
+    returns True when an LLM-written body is available afterwards."""
+    if _cached_llm_body() is not None:
+        return True
+    try:
+        from app.generator.llm_brief import llm_brief_body
+
+        body = llm_brief_body()
+    except Exception as exc:  # pragma: no cover - any LLM failure keeps the template
+        log.warning("brief generation fell back to the template: %s", exc)
+        return False
+    if not body:
+        return False
+    with db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO brief_cache (seed, brief_json) VALUES (?, ?)",
+            (LLM_BODY_KEY, json.dumps({"body": body})),
+        )
+    return True
+
+
 def get_brief(seed: str) -> BriefInfo:
-    """Cached per seed in SQLite; falls back to the template on any LLM failure."""
+    """Cached per seed in SQLite. Uses the LLM-written body when one is ready and it
+    passes the leak guard for this seed; otherwise the hand-written template. Never
+    calls a model itself."""
     cached = _cached_brief(seed)
     if cached is not None:
         return cached
 
     brief = template_brief()
-    try:
+    body = _cached_llm_body()
+    if body is not None:
         from app.generator.build import load_dataset
-        from app.generator.llm_brief import llm_brief_body
         from app.tutor.guard import leaks
 
-        body = llm_brief_body()
-        if body and leaks(body, load_dataset(seed).ground_truth) is None:
+        if leaks(body, load_dataset(seed).ground_truth) is None:
             brief = BriefInfo(
                 **{
                     "from": sc.MANAGER_FROM,
@@ -98,8 +144,7 @@ def get_brief(seed: str) -> BriefInfo:
                     "task_definitions": list(TASK_DEFINITIONS),
                 }
             )
-    except Exception as exc:  # pragma: no cover - any LLM failure keeps the template
-        log.warning("brief generation fell back to the template: %s", exc)
-
-    _cache_brief(seed, brief)
+        # Only pin the choice once the LLM body exists, so sessions started while the
+        # startup call is still running do not freeze the template in for this seed.
+        _cache_brief(seed, brief)
     return brief

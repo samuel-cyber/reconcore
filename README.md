@@ -41,8 +41,19 @@ Order is **primary → fallback → template**. The primary is Meta's Model API
 catches everything else. Each model gets one attempt inside `LLM_TIMEOUT_S` with no
 internal retries, `reasoning_effort` is sent explicitly and dropped for the rest of
 the process if a provider rejects it, and the leak guard runs on whichever model
-answered. `/health` reports `"llm":"up"` only after a real call to the primary
-succeeded at startup — a configured-but-broken key reads `"fallback"`.
+answered. No `max_tokens` and no `temperature` are sent: Muse Spark is a reasoning
+model, so a small token cap is spent on thinking and the reply comes back empty.
+`/health` reports `"llm":"up"` only while the most recent real call to the primary
+succeeded; otherwise it reports `"fallback"` together with `llm_reason`, the actual
+error (never the key). The manager's brief is written by the LLM once at startup and
+reused for every seed, so `/api/session/init` never waits on a model.
+
+### Mock mode
+
+`NEXT_PUBLIC_USE_MOCKS=true` runs the UI against local fixtures for layout work. It is
+an explicit build-time switch and is never entered automatically: if the real backend
+is unreachable the UI retries while the host wakes, then shows an error. Grading and
+credential verification only ever happen on the server.
 
 ### The demo loop
 
@@ -80,7 +91,8 @@ loop end to end.
 | `LLM_FALLBACK_MODEL` | no | `openai/<featherless model id>` | Tried only when the primary fails. Blank → straight to templates |
 | `LLM_FALLBACK_API_BASE` | no | `https://api.featherless.ai/v1` | Fallback provider endpoint |
 | `LLM_FALLBACK_API_KEY` | no | `…` | Featherless key |
-| `LLM_TIMEOUT_S` | no | `5` | Hard deadline **per model** before moving on |
+| `LLM_TIMEOUT_S` | no | `20` | Hard deadline **per model** before moving on. Muse Spark reasons before answering; below ~15 every hint becomes a template |
+| `LLM_MAX_TOKENS` | no | `0` | `0` sends no cap. Reasoning tokens count against a cap and starve the reply |
 
 ### Frontend (`frontend/.env.local` locally, Vercel → Environment Variables)
 
@@ -118,7 +130,7 @@ sets everything except the two secrets. Or create a Web Service by hand:
 Then check:
 
 ```bash
-curl https://reconcore-api.onrender.com/health      # {"ok":true,"llm":"fallback"|"up"}
+curl https://reconcore-api.onrender.com/health      # {"ok":true,"llm":"up"} or {"llm":"fallback","llm_reason":"<why>"}
 curl https://reconcore-api.onrender.com/api/issuer  # the did:key your badges carry
 ```
 

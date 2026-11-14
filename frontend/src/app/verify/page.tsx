@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   Upload,
 } from "lucide-react";
-import { getIssuer, verifyBadge } from "@/lib/api";
+import { getIssuer, getSampleCredential, verifyBadge } from "@/lib/api";
 import type {
   BadgeCredential,
   IssuerProfile,
@@ -19,7 +19,6 @@ import type {
 } from "@/lib/api-types";
 import { useSession } from "@/lib/session-context";
 import VerifyResult from "@/components/VerifyResult";
-import submitPassFixture from "@/mocks/submit-pass.json";
 
 export default function StandaloneVerifyPage() {
   const { badge: sessionBadge, showToast } = useSession();
@@ -28,6 +27,7 @@ export default function StandaloneVerifyPage() {
   const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
+  const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [issuer, setIssuer] = useState<IssuerProfile | null>(null);
 
   const textareaId = useId();
@@ -58,22 +58,38 @@ export default function StandaloneVerifyPage() {
     }
   };
 
-  const handleLoadSampleValid = () => {
-    const targetBadge = sessionBadge ?? submitPassFixture.badge;
-    setJsonInput(JSON.stringify(targetBadge, null, 2));
-    setUploadedFilename("sample-valid-badge.json");
-    setVerifyResult(null);
+  // Samples come from the candidate's own badge when there is one, otherwise from the
+  // backend, which signs a specimen with the live issuer key. Either way the verifier
+  // below is checking a real signature, never a canned one.
+  const loadSample = async (tampered: boolean) => {
+    if (isLoadingSample) return;
+    setIsLoadingSample(true);
+    try {
+      const base = structuredClone(
+        (sessionBadge ?? (await getSampleCredential())) as BadgeCredential
+      );
+      if (tampered) {
+        base.credentialSubject.name = `${base.credentialSubject.name} (edited)`;
+      }
+      setJsonInput(JSON.stringify(base, null, 2));
+      setUploadedFilename(
+        tampered ? "sample-tampered-badge.json" : "sample-valid-badge.json"
+      );
+      setVerifyResult(null);
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : "Could not load a sample credential from the server.",
+        "sample_error"
+      );
+    } finally {
+      setIsLoadingSample(false);
+    }
   };
 
-  const handleLoadSampleTampered = () => {
-    const baseBadge = structuredClone(
-      (sessionBadge ?? submitPassFixture.badge) as BadgeCredential
-    );
-    baseBadge.credentialSubject.name = `${baseBadge.credentialSubject.name} (edited)`;
-    setJsonInput(JSON.stringify(baseBadge, null, 2));
-    setUploadedFilename("sample-tampered-badge.json");
-    setVerifyResult(null);
-  };
+  const handleLoadSampleValid = () => loadSample(false);
+  const handleLoadSampleTampered = () => loadSample(true);
 
   const handleVerifySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -232,6 +248,7 @@ export default function StandaloneVerifyPage() {
                 <button
                   type="button"
                   onClick={handleLoadSampleValid}
+                  disabled={isLoadingSample}
                   className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                 >
                   <FileJson className="h-3.5 w-3.5" aria-hidden="true" />
@@ -241,6 +258,7 @@ export default function StandaloneVerifyPage() {
                 <button
                   type="button"
                   onClick={handleLoadSampleTampered}
+                  disabled={isLoadingSample}
                   className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-900 hover:bg-red-100"
                 >
                   <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />

@@ -26,6 +26,8 @@ ID_PATTERN = r"^[A-Za-z0-9-]{1,20}$"
 class HealthResponse(BaseModel):
     ok: bool
     llm: Literal["up", "fallback"]
+    # Present only in fallback: the reason the last LLM call failed (or was not made).
+    llm_reason: str | None = None
 
 
 # ------------------------------------------------------------------- session / init

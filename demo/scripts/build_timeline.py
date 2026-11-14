@@ -90,6 +90,8 @@ def main() -> None:
             "audio": f"audio/{sid}.mp3",
             "narrationSeconds": narration,
             "clip": f"clips/{sid}.mp4" if scene["kind"] == "screen" else None,
+            "frameCount": (len(list((ROOT / f"video/public/frames/{sid}").glob("*.jpg")))
+                           if scene["kind"] == "screen" else None),
             "captions": cues,
         })
 

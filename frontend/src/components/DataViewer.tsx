@@ -261,7 +261,7 @@ export default function DataViewer({
   return (
     <section
       aria-label="Source Datasets Viewer"
-      className="flex h-full min-h-0 min-w-0 flex-col gap-4 bg-white p-6"
+      className="flex h-full min-h-0 min-w-0 flex-col gap-4 bg-white p-4"
     >
       {/* Top Toolbar: Dataset Tabs + Single Download Menu Control */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
@@ -476,7 +476,7 @@ export default function DataViewer({
                   <th
                     key={col}
                     scope="col"
-                    className={`border-b border-slate-300 bg-slate-100 px-4 py-3 font-mono text-sm whitespace-nowrap ${
+                    className={`border-b border-slate-300 bg-slate-100 px-2.5 py-2.5 font-mono text-[13px] whitespace-nowrap ${
                       colIdx === 0
                         ? "sticky left-0 z-30 border-r border-slate-300 bg-slate-100 text-left shadow-[2px_0_4px_-2px_rgba(15,23,42,0.12)]"
                         : NUMERIC_ALIGN_COLUMNS.has(col)
@@ -545,7 +545,7 @@ export default function DataViewer({
                             <th
                               key={`${colName}-${cellIdx}`}
                               scope="row"
-                              className={`sticky left-0 z-10 border-r border-b border-slate-200 px-4 py-3 font-mono text-sm font-semibold whitespace-pre tabular-nums text-slate-900 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)] group-hover:bg-amber-50 ${
+                              className={`sticky left-0 z-10 border-r border-b border-slate-200 px-2.5 py-2.5 font-mono text-[13px] font-semibold whitespace-pre tabular-nums text-slate-900 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)] group-hover:bg-amber-50 ${
                                 isEven ? "bg-slate-50" : "bg-white"
                               }`}
                             >
@@ -557,7 +557,7 @@ export default function DataViewer({
                         return (
                           <td
                             key={`${colName}-${cellIdx}`}
-                            className={`border-b border-slate-200/70 px-4 py-3 text-sm whitespace-pre ${
+                            className={`border-b border-slate-200/70 px-2.5 py-2.5 text-[13px] whitespace-pre ${
                               isMono
                                 ? "font-mono tabular-nums text-slate-900"
                                 : "text-slate-800"

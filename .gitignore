@@ -11,3 +11,8 @@ demo/video/public/fonts/
 demo/scripts/node_modules/
 demo/video/node_modules/
 *.mp4
+demo/video/public/frames/
+.DS_Store
+*.db
+*.db-shm
+*.db-wal

@@ -261,3 +261,31 @@ def test_a_hash_that_no_seed_reproduces_is_still_unknown(badge):
     assert result.signature_verified is True
     assert result.hash_match is False
     assert result.reason == "hash_unknown"
+
+
+# ---------------------------------------------------------------- the signed sample
+
+
+def test_the_sample_credential_is_genuinely_signed(client):
+    sample = client.get("/api/credential/sample").json()
+    assert "sample" in sample["credentialSubject"]["name"].lower()
+    verdict = client.post("/api/credential/verify", json={"badge": sample}).json()
+    assert verdict["valid"] is True
+    assert verdict["signature_verified"] and verdict["hash_match"] and verdict["issuer_match"]
+
+
+def test_a_tampered_sample_fails(client):
+    sample = client.get("/api/credential/sample").json()
+    sample["credentialSubject"]["name"] = "Someone Else"
+    verdict = client.post("/api/credential/verify", json={"badge": sample}).json()
+    assert verdict["valid"] is False
+    assert verdict["reason"] == "signature_invalid"
+
+
+def test_the_sample_credential_holds_no_ground_truth(client):
+    from app.generator.build import generate
+
+    truth = generate("demo").ground_truth
+    text = client.get("/api/credential/sample").text
+    for secret in (truth.missing_tx_id, truth.duplicate_wb_id, truth.decoy_tx_id):
+        assert secret not in text

@@ -52,8 +52,13 @@ const Scene: React.FC<{ scene: (typeof timeline.scenes)[number]; fps: number }> 
   const Animation = ANIMATIONS[scene.id];
   return (
     <AbsoluteFill style={{ backgroundColor: theme.bg }}>
-      {scene.kind === 'screen' && scene.clip ? (
-        <ZoomClip src={scene.clip} keys={ZOOMS[scene.id]} fps={fps} />
+      {scene.kind === 'screen' ? (
+        <ZoomClip
+          clipId={scene.id}
+          frameCount={scene.frameCount ?? scene.durationInFrames}
+          keys={ZOOMS[scene.id]}
+          fps={fps}
+        />
       ) : (
         Animation && <Animation />
       )}

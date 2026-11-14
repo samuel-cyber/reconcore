@@ -31,6 +31,7 @@ export default function BadgeModal() {
   } = useSession();
 
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const verifyResultsRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const rawCodeCaptionId = useId();
 
@@ -111,6 +112,16 @@ export default function BadgeModal() {
       }
     };
   }, [closeBadgeModal]);
+
+  // The verdict is the point of the demo: bring it into view instead of leaving it
+  // below the fold of the modal.
+  useEffect(() => {
+    if (!validVerifyResult && !tamperVerifyResult) return;
+    const id = window.requestAnimationFrame(() => {
+      verifyResultsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [validVerifyResult, tamperVerifyResult]);
 
   // Reset verification results when a new badge is minted
   useEffect(() => {
@@ -221,7 +232,7 @@ export default function BadgeModal() {
           </span>
           <div>
             <span className="text-xs font-bold tracking-wider text-emerald-800 uppercase">
-              Result Modal · Verifiable Credential Minted
+              Verifiable credential issued
             </span>
             <h2 id={titleId} className="text-base font-bold text-slate-900">
               {badge.credentialSubject.achievement.name}
@@ -361,7 +372,8 @@ export default function BadgeModal() {
         {/* Live Verification & Side-by-Side Tamper Test Output */}
         {(validVerifyResult || tamperVerifyResult) && (
           <div
-            className={`grid gap-4 ${
+            ref={verifyResultsRef}
+            className={`scroll-mt-4 grid gap-4 ${
               validVerifyResult && tamperVerifyResult
                 ? "grid-cols-1 md:grid-cols-2"
                 : "grid-cols-1"
@@ -378,7 +390,7 @@ export default function BadgeModal() {
               <VerifyResult
                 result={tamperVerifyResult}
                 title="Tamper Test (Edited Payload)"
-                subtitle={`Mutated candidateSubject.name → "${
+                subtitle={`Edited credentialSubject.name → "${
                   tamperedNamePreview ??
                   `${badge.credentialSubject.name} (edited)`
                 }"`}

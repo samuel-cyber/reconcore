@@ -12,6 +12,7 @@
       "audio": "audio/s1.mp3",
       "narrationSeconds": 6.312,
       "clip": null,
+      "frameCount": null,
       "captions": [
         {
           "text": "Forty-five thousand naira just went missing \u2014 somewhere between the till, the warehouse and the bank.",
@@ -27,6 +28,7 @@
       "audio": "audio/s2.mp3",
       "narrationSeconds": 13.44,
       "clip": null,
+      "frameCount": null,
       "captions": [
         {
           "text": "Every year, thousands of accounting, finance and business graduates leave school with certificates that say what they studied.",
@@ -52,6 +54,7 @@
       "audio": "audio/s3.mp3",
       "narrationSeconds": 7.416,
       "clip": null,
+      "frameCount": null,
       "captions": [
         {
           "text": "This is ReconCore. Practise real business operations, and earn proof that employers can verify.",
@@ -67,6 +70,7 @@
       "audio": "audio/s4.mp3",
       "narrationSeconds": 16.248,
       "clip": "clips/s4.mp4",
+      "frameCount": 839,
       "captions": [
         {
           "text": "Each candidate gets a realistic crisis.",
@@ -97,6 +101,7 @@
       "audio": "audio/s5.mp3",
       "narrationSeconds": 14.424,
       "clip": "clips/s5.mp4",
+      "frameCount": 796,
       "captions": [
         {
           "text": "Here's a wrong attempt. The candidate matched on amount alone and picked a transfer that was actually settled.",
@@ -122,6 +127,7 @@
       "audio": "audio/s6.mp3",
       "narrationSeconds": 11.352,
       "clip": "clips/s6.mp4",
+      "frameCount": 600,
       "captions": [
         {
           "text": "Second attempt: forty-five thousand naira, transaction POS-1042, and the duplicate waybill WB-3311.",
@@ -142,6 +148,7 @@
       "audio": "audio/s7.mp3",
       "narrationSeconds": 16.224,
       "clip": null,
+      "frameCount": null,
       "captions": [
         {
           "text": "This is the core design choice.",
@@ -172,6 +179,7 @@
       "audio": "audio/s8.mp3",
       "narrationSeconds": 20.352,
       "clip": "clips/s8.mp4",
+      "frameCount": 899,
       "captions": [
         {
           "text": "On success, ReconCore issues an Open Badges 3.0\u2013style credential, signed with Ed25519.",
@@ -202,6 +210,7 @@
       "audio": "audio/s9.mp3",
       "narrationSeconds": 5.328,
       "clip": null,
+      "frameCount": null,
       "captions": [
         {
           "text": "ReconCore. Practise the real work \u2014 and prove it with math.",

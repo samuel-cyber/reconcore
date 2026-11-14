@@ -24,7 +24,12 @@ class Settings(BaseSettings):
     llm_fallback_api_base: str = "https://api.featherless.ai/v1"
     llm_fallback_api_key: str = ""
 
-    llm_timeout_s: float = 5.0
+    # Muse Spark reasons before it answers, so a hint takes several seconds. Five was
+    # too tight and silently pushed every hint onto the templates.
+    llm_timeout_s: float = 20.0
+    # 0 = send no max_tokens at all. Reasoning tokens count against the cap, so a small
+    # value starves the reply; only set this for a non-reasoning fallback model.
+    llm_max_tokens: int = 0
 
     issuer_private_key_b64: str = ""
     issuer_name: str = "ReconCore"

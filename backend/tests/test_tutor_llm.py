@@ -10,7 +10,12 @@ from datetime import datetime, timezone
 import pytest
 
 from app.config import get_settings
-from app.generator.brief import TEMPLATE_BODY, get_brief, template_brief
+from app.generator.brief import (
+    TEMPLATE_BODY,
+    get_brief,
+    prewarm_llm_brief,
+    template_brief,
+)
 from app.generator.build import generate
 from app.schemas import FieldStatusMap
 from app.store.sessions import SessionRecord
@@ -145,6 +150,10 @@ def test_the_call_carries_api_base_key_effort_timeout_and_no_retries(primary, mo
     assert kwargs["timeout"] == get_settings().llm_timeout_s
     assert kwargs["request_timeout"] == get_settings().llm_timeout_s
     assert kwargs["num_retries"] == 0
+    # Muse Spark reasons before it answers: a token cap starves the reply, and
+    # reasoning models commonly reject a custom temperature. Send neither.
+    assert "max_tokens" not in kwargs
+    assert "temperature" not in kwargs
     # Chat completions, not the Responses API.
     assert isinstance(kwargs["messages"], list)
     assert {m["role"] for m in kwargs["messages"]} <= {"system", "user", "assistant"}
@@ -332,6 +341,7 @@ def test_the_brief_uses_the_llm_when_it_is_clean(primary, monkeypatch):
     calls: list[dict] = []
     body = " ".join(["The October books close on Friday and auditors flagged two issues."] * 14)
     install(monkeypatch, {PRIMARY: body}, calls)
+    assert prewarm_llm_brief() is True
     brief = get_brief("demo")
 
     from app.generator.brief import DISCREPANCY_DEFINITION, TASK_DEFINITIONS
@@ -345,12 +355,14 @@ def test_a_leaking_brief_is_discarded(primary, monkeypatch):
     calls: list[dict] = []
     body = " ".join(["Find the missing ₦45,000 transfer from the till today please."] * 14)
     install(monkeypatch, {PRIMARY: body}, calls)
+    prewarm_llm_brief()
     assert get_brief("demo").body_markdown == TEMPLATE_BODY
 
 
 def test_a_too_short_brief_is_discarded(primary, monkeypatch):
     calls: list[dict] = []
     install(monkeypatch, {PRIMARY: "Too short."}, calls)
+    assert prewarm_llm_brief() is False
     assert get_brief("demo").body_markdown == TEMPLATE_BODY
 
 
@@ -358,14 +370,35 @@ def test_the_brief_is_cached_per_seed(primary, monkeypatch):
     calls: list[dict] = []
     body = " ".join(["We are closing the October books for head office this week."] * 14)
     install(monkeypatch, {PRIMARY: body}, calls)
+    prewarm_llm_brief()
     assert get_brief("cache-me") == get_brief("cache-me")
-    assert len(calls) == 1  # the second came from SQLite
+    assert len(calls) == 1  # one model call for the whole process
+
+
+def test_the_brief_is_written_once_and_reused_for_every_seed(primary, monkeypatch):
+    calls: list[dict] = []
+    body = " ".join(["We are closing the October books for head office this week."] * 14)
+    install(monkeypatch, {PRIMARY: body}, calls)
+    prewarm_llm_brief()
+    prewarm_llm_brief()
+    for seed in ("seed-a", "seed-b", "seed-c"):
+        assert body.split(".")[0] in get_brief(seed).body_markdown
+    assert len(calls) == 1
+
+
+def test_init_never_waits_on_a_model(primary, monkeypatch):
+    """`get_brief` runs inside /api/session/init. It must not call the LLM itself."""
+    calls: list[dict] = []
+    install(monkeypatch, {PRIMARY: TimeoutError("slow")}, calls)
+    assert get_brief("no-prewarm").body_markdown == TEMPLATE_BODY
+    assert calls == []
 
 
 def test_the_brief_can_come_from_the_fallback(with_fallback, monkeypatch):
     calls: list[dict] = []
     body = " ".join(["Head office wants the October reconciliation closed by Friday."] * 14)
     install(monkeypatch, {PRIMARY: Exception("down"), FALLBACK: body}, calls)
+    prewarm_llm_brief()
     assert body.split(".")[0] in get_brief("fallback-seed").body_markdown
 
 
@@ -373,7 +406,9 @@ def test_the_brief_can_come_from_the_fallback(with_fallback, monkeypatch):
 
 
 def test_health_is_fallback_before_any_probe_runs(client):
-    assert client.get("/health").json() == {"ok": True, "llm": "fallback"}
+    body = client.get("/health").json()
+    assert (body["ok"], body["llm"]) == (True, "fallback")
+    assert body["llm_reason"] == "LLM_API_KEY is not set"
 
 
 def test_health_is_fallback_when_the_probe_fails(primary, monkeypatch, client):
@@ -381,16 +416,21 @@ def test_health_is_fallback_when_the_probe_fails(primary, monkeypatch, client):
     install(monkeypatch, {PRIMARY: Exception("401 unauthorized")}, calls)
     assert llm_module.probe_primary() is False
     assert len(calls) == 1
-    assert client.get("/health").json() == {"ok": True, "llm": "fallback"}
+    body = client.get("/health").json()
+    assert (body["ok"], body["llm"]) == (True, "fallback")
+    # The real reason is surfaced, and the key never is.
+    assert "401 unauthorized" in body["llm_reason"]
+    assert "meta-test-key" not in body["llm_reason"]
 
 
 def test_health_is_up_only_after_a_real_call_succeeds(primary, monkeypatch, client):
     calls: list[dict] = []
     install(monkeypatch, {PRIMARY: "pong"}, calls)
     assert llm_module.probe_primary() is True
-    assert calls[0]["max_tokens"] == 1
+    # The probe is an ordinary call: same parameters as a hint, no token cap.
+    assert "max_tokens" not in calls[0]
     assert calls[0]["model"] == PRIMARY
-    assert client.get("/health").json() == {"ok": True, "llm": "up"}
+    assert client.get("/health").json() == {"ok": True, "llm": "up", "llm_reason": None}
 
 
 def test_the_probe_does_not_run_without_a_key(monkeypatch):
@@ -414,9 +454,62 @@ def test_the_probe_survives_a_provider_that_dislikes_reasoning_effort(
     install(monkeypatch, behaviour, calls)
     assert llm_module.probe_primary() is True
     assert len(calls) == 2
-    assert client.get("/health").json() == {"ok": True, "llm": "up"}
+    assert client.get("/health").json()["llm"] == "up"
 
     # The hint path then skips the parameter from the start.
     calls.clear()
     build_hint(session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1)
     assert len(calls) == 1 and "reasoning_effort" not in calls[0]
+
+
+# ------------------------------------------------------- reasoning-model behaviour
+
+
+def test_an_empty_reply_is_a_failure_with_a_reason(primary, monkeypatch, client):
+    """A reasoning model that spends its whole budget thinking returns no text. That
+    must read as 'fallback, and here is why', never as 'up'."""
+    calls: list[dict] = []
+    install(monkeypatch, {PRIMARY: ""}, calls)
+    assert llm_module.probe_primary() is False
+    body = client.get("/health").json()
+    assert body["llm"] == "fallback"
+    assert "no text" in body["llm_reason"]
+
+    hint = build_hint(
+        session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1
+    )
+    assert hint.source == "template"
+
+
+def test_a_configured_token_cap_is_sent(primary, monkeypatch):
+    monkeypatch.setattr(get_settings(), "llm_max_tokens", 900, raising=False)
+    calls: list[dict] = []
+    install(monkeypatch, {PRIMARY: "Which table?"}, calls)
+    build_hint(session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1)
+    assert calls[0]["max_tokens"] == 900
+
+
+def test_health_follows_the_most_recent_real_call(primary, monkeypatch, client):
+    """A slow model at boot must not pin /health to fallback for the life of the process."""
+    calls: list[dict] = []
+    install(monkeypatch, {PRIMARY: TimeoutError("cold start")}, calls)
+    assert llm_module.probe_primary() is False
+    assert client.get("/health").json()["llm"] == "fallback"
+
+    install(monkeypatch, {PRIMARY: "Which table should every transfer reach?"}, calls)
+    hint = build_hint(
+        session=_session(), field_status=STATUS, diagnostics=None, attempt_no=1
+    )
+    assert hint.source == "llm"
+    assert client.get("/health").json()["llm"] == "up"
+
+
+def test_a_key_in_a_provider_error_is_scrubbed(primary, monkeypatch, client):
+    calls: list[dict] = []
+    install(
+        monkeypatch,
+        {PRIMARY: Exception("Incorrect API key provided: meta-test-key")},
+        calls,
+    )
+    llm_module.probe_primary()
+    assert "meta-test-key" not in client.get("/health").json()["llm_reason"]

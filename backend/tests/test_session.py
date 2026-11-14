@@ -207,6 +207,17 @@ def test_bad_ids_are_rejected_as_invalid_input(client):
     )
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "invalid_input"
+    # The error must not hand out the demo answers as "examples".
+    message = res.json()["error"]["message"]
+    assert "1042" not in message and "3311" not in message
+
+
+def test_there_is_one_task_definition_per_task_in_ui_order(client):
+    definitions = _init(client)["brief"]["task_definitions"]
+    assert len(definitions) == 3
+    assert "discrepancy_ngn" in definitions[0]
+    assert "tx_id" in definitions[1] and "customer_ref" in definitions[1]
+    assert "duplicate waybill" in definitions[2]
 
 
 def test_submit_on_an_unknown_session_is_404(client):

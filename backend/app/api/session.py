@@ -128,8 +128,8 @@ def submit(payload: SubmitRequest) -> SubmitResponse:
     if not is_valid_id(tx_id) or not is_valid_id(wb_id):
         raise ApiError(
             "invalid_input",
-            "Transaction and waybill IDs must be 1–20 letters, digits or hyphens "
-            "(e.g. POS-1042, WB-3311).",
+            "Transaction and waybill IDs must be 1–20 letters, digits or hyphens, "
+            "copied exactly as they appear in the tables.",
             422,
         )
 

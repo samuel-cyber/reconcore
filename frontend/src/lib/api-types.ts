@@ -19,6 +19,8 @@ export type VerifyReason =
 export interface HealthResponse {
   ok: boolean;
   llm: "up" | "fallback";
+  /** Present only in fallback: why the last LLM call failed (or was not made). */
+  llm_reason?: string | null;
 }
 
 export interface ScenarioInfo {

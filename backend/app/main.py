@@ -30,7 +30,12 @@ def _prewarm_llm() -> None:
         return
     from app.tutor.llm import probe_primary
 
-    probe_primary()
+    if probe_primary():
+        # Write the manager's message now, off the request path, so the first
+        # candidate's /init is instant.
+        from app.generator.brief import prewarm_llm_brief
+
+        prewarm_llm_brief()
 
 
 @asynccontextmanager
@@ -70,10 +75,14 @@ install_error_handlers(app)
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 def health() -> HealthResponse:
-    from app.tutor.llm import llm_is_up
+    from app.tutor.llm import llm_is_up, llm_reason
 
-    # "up" only once a real call to the primary model has succeeded at startup.
-    return HealthResponse(ok=True, llm="up" if llm_is_up() else "fallback")
+    # "up" only while the most recent real call to the primary model succeeded.
+    # `llm_reason` says why it is in fallback (never contains a key).
+    up = llm_is_up()
+    return HealthResponse(
+        ok=True, llm="up" if up else "fallback", llm_reason=None if up else llm_reason()
+    )
 
 
 from app.api import credential as credential_api  # noqa: E402

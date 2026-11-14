@@ -36,10 +36,48 @@ def clamp_level(attempt_no: int) -> int:
     return max(1, min(attempt_no, MAX_LEVEL))
 
 
-def template_text(level: int, field_status: dict[str, str]) -> str:
-    """Address only the fields that are wrong, at most two sentences."""
-    rung = LADDER[clamp_level(level)]
-    parts = [rung[name] for name in FIELD_ORDER if field_status.get(name) != "correct"]
+# Sharper openers for the three mistakes the grader can recognise. Like the ladder they
+# are fixed text: no amount, no ID, nothing seed-specific.
+DIAGNOSTIC_HINTS: dict[str, str] = {
+    "included_cash": (
+        "Your total is too high, and it looks like cash sales were counted. Does cash "
+        "ever reach the bank statement?"
+    ),
+    "hit_decoy": (
+        "That transfer shares its amount with another one, and only one of them is "
+        "missing. Which of the two has its customer reference in a bank narration?"
+    ),
+    "picked_original_waybill": (
+        "You found the right delivery, but that is the original entry. Which copy was "
+        "logged second, with the product name misspelled?"
+    ),
+}
+
+
+def _field_text(name: str, level: int, diagnostics) -> str:
+    """The diagnostic opener when the grader recognised the mistake, else the ladder."""
+    if diagnostics is not None:
+        if name == "discrepancy_ngn" and diagnostics.included_cash:
+            return DIAGNOSTIC_HINTS["included_cash"]
+        if name == "missing_tx_id" and diagnostics.hit_decoy:
+            return DIAGNOSTIC_HINTS["hit_decoy"]
+        if name == "duplicate_wb_id" and diagnostics.picked_original_waybill:
+            return DIAGNOSTIC_HINTS["picked_original_waybill"]
+    return LADDER[clamp_level(level)][name]
+
+
+def template_text(level: int, field_status: dict[str, str], diagnostics=None) -> str:
+    """Address only the fields that are wrong, two fields at most.
+
+    `diagnostics` is the grader's private read of the mistake (decoy picked, cash
+    included, original waybill picked). When it recognises one, the hint speaks to that
+    mistake; it still never names an amount or an ID.
+    """
+    parts = [
+        _field_text(name, level, diagnostics)
+        for name in FIELD_ORDER
+        if field_status.get(name) != "correct"
+    ]
     if not parts:  # pragma: no cover - a hint is only built for a failed attempt
-        parts = [rung["discrepancy_ngn"]]
+        parts = [LADDER[clamp_level(level)]["discrepancy_ngn"]]
     return " ".join(parts[:2])

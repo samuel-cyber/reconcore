@@ -18,7 +18,7 @@ import {
   Sparkles,
   UserCheck,
 } from "lucide-react";
-import { initSession, isMockMode } from "@/lib/api";
+import { isMockMode } from "@/lib/api";
 import { useSession } from "@/lib/session-context";
 
 function renderInlineMarkdown(text: string): React.ReactNode[] {
@@ -81,68 +81,20 @@ export default function BriefingPage() {
     }
   }, []);
 
-  // Automatically initialize a default session if visited directly without one
+  // A briefing only exists for a session the candidate started themselves. Opened
+  // directly (new tab, shared link, expired tab), send them to the start screen
+  // instead of inventing a session under a placeholder name.
+  const goToStart = React.useCallback(() => {
+    router.replace(`/${window.location.search}`);
+  }, [router]);
+
   useEffect(() => {
-    if (!isHydrated || session || isBootstrapping || forceEmptyState) return;
-    let cancelled = false;
-
-    const autoInit = async () => {
-      setIsBootstrapping(true);
-      setErrorMessage(null);
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const seedParam = params.get("seed");
-        const res = await initSession({
-          candidate_name: "Ada Okafor",
-          seed: seedParam || "demo",
-        });
-        if (!cancelled) {
-          setSessionData(
-            res,
-            "Ada Okafor",
-            seedParam === "demo" ? "demo" : undefined
-          );
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setErrorMessage(
-            err instanceof Error
-              ? err.message
-              : "Failed to load briefing scenario."
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setIsBootstrapping(false);
-        }
-      }
-    };
-
-    autoInit();
-    return () => {
-      cancelled = true;
-    };
-  }, [isHydrated, session, isBootstrapping, forceEmptyState, setSessionData]);
-
-  const handleRetryLoad = async () => {
-    setForceEmptyState(false);
-    setErrorMessage(null);
-    setIsBootstrapping(true);
-    try {
-      const res = await initSession({
-        candidate_name: candidateName || "Ada Okafor",
-        seed: "demo",
-      });
-      setSessionData(res, candidateName || "Ada Okafor", seed);
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Failed to initialize session.";
-      setErrorMessage(msg);
-      showToast(msg, "init_failed", "error");
-    } finally {
-      setIsBootstrapping(false);
+    if (isHydrated && !session) {
+      goToStart();
     }
-  };
+  }, [isHydrated, session, goToStart]);
+
+  const handleRetryLoad = goToStart;
 
   const handleBeginWorkspace = () => {
     startTimer();

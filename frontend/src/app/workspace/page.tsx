@@ -17,7 +17,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { initSession, isMockMode } from "@/lib/api";
+import { isMockMode } from "@/lib/api";
 import { useSession, type WorkspaceTabKey } from "@/lib/session-context";
 import BriefPanel from "@/components/BriefPanel";
 import SubmissionForm from "@/components/SubmissionForm";
@@ -91,76 +91,29 @@ export default function WorkspacePage() {
     }
   }, [isHydrated, session, timerStartedAt, startTimer]);
 
-  // Auto-initialize demo session if user/test opens /workspace directly without a session
+  // The workspace only exists for a session the candidate started themselves. Opened
+  // directly (new tab, shared link, expired tab), go back to the start screen rather
+  // than inventing a session under a placeholder name.
+  const goToStart = React.useCallback(() => {
+    router.replace(`/${window.location.search}`);
+  }, [router]);
+
+  const leavingRef = useRef(false);
   useEffect(() => {
-    if (!isHydrated || session || isQuickStarting) return;
-    let cancelled = false;
-
-    const autoInit = async () => {
-      setIsQuickStarting(true);
-      setWorkspaceError(null);
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const seedParam = params.get("seed");
-        const res = await initSession({
-          seed: seedParam || "demo",
-          candidate_name: "Ada Okafor",
-        });
-        if (!cancelled) {
-          setSessionData(
-            res,
-            "Ada Okafor",
-            seedParam === "demo" ? "demo" : undefined
-          );
-          startTimer();
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setWorkspaceError(
-            err instanceof Error
-              ? err.message
-              : "Failed to initialize workspace session."
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setIsQuickStarting(false);
-        }
-      }
-    };
-
-    autoInit();
-    return () => {
-      cancelled = true;
-    };
-  }, [isHydrated, session, isQuickStarting, setSessionData, startTimer]);
-
-  const handleQuickDemoInit = async () => {
-    if (isQuickStarting) return;
-    setIsQuickStarting(true);
-    setWorkspaceError(null);
-    try {
-      const res = await initSession({
-        seed: "demo",
-        candidate_name: "Ada Okafor",
-      });
-      setSessionData(res, "Ada Okafor", urlSeedDemo ? "demo" : undefined);
-      startTimer();
-    } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "Failed to initialize demo session.";
-      setWorkspaceError(msg);
-      showToast(msg, "init_failed", "error");
-    } finally {
-      setIsQuickStarting(false);
+    if (isHydrated && !session && !leavingRef.current) {
+      goToStart();
     }
-  };
+  }, [isHydrated, session, goToStart]);
+
+  const handleQuickDemoInit = goToStart;
 
   const handleNewSession = () => {
+    // Stay on the pinned demo dataset if that is what this session was using, so a
+    // presenter who resets between runs does not land on a different dataset.
+    const next = seed === "demo" || urlSeedDemo ? "/?seed=demo" : "/";
+    leavingRef.current = true;
     resetSession();
-    router.push("/");
+    router.push(next);
   };
 
   const selectAndFocusLeftTab = (nextKey: WorkspaceTabKey) => {
@@ -287,7 +240,7 @@ export default function WorkspacePage() {
                   No Active Reconciliation Session
                 </h1>
                 <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                  Start from the landing page or launch the default scenario.
+                  Returning you to the start screen to begin a session.
                 </p>
               </div>
               <button
@@ -295,7 +248,7 @@ export default function WorkspacePage() {
                 onClick={handleQuickDemoInit}
                 className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
               >
-                <span>Launch Workspace</span>
+                <span>Go to Start Screen</span>
               </button>
             </div>
           )}
@@ -439,7 +392,7 @@ export default function WorkspacePage() {
       </header>
 
       {/* Two-Pane Workspace: Left (35%) Tabs Brief | Answer | Hints, Right (65%) DataViewer */}
-      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[35%_65%]">
+      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(340px,30%)_minmax(0,1fr)]">
         {/* Left Pane (35%): Tabs Brief | Answer | Hints */}
         <div className="flex min-h-0 min-w-0 flex-col border-b border-slate-200 bg-white lg:border-r lg:border-b-0">
           {/* Left Pane Tablist */}

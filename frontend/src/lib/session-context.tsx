@@ -16,6 +16,7 @@ import type {
   SubmitResponse,
   TutorHint,
 } from "./api-types";
+import { checkHealth, isMockMode } from "./api";
 
 export interface AttemptRecord {
   attempt_no: number;
@@ -172,6 +173,21 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     timerStartedAt,
     checkedTasks,
   ]);
+
+  // Keep the server awake while a candidate is working. A free-tier host sleeps after
+  // ~15 idle minutes and forgets its sessions when it restarts, which would strand
+  // someone who is quietly reading the tables.
+  const activeSessionId = session?.session_id ?? null;
+  useEffect(() => {
+    if (!activeSessionId || badge || isMockMode()) return;
+    const ping = () => {
+      checkHealth().catch(() => {
+        // Best effort only; a real request will surface any outage.
+      });
+    };
+    const interval = window.setInterval(ping, 4 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [activeSessionId, badge]);
 
   // Tick elapsed timer once started until solved
   useEffect(() => {
