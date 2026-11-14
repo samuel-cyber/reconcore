@@ -174,8 +174,13 @@ def _call(
                 )
                 _record(target, False, reason)
                 return None
-        reason = f"{type(exc).__name__}: {_scrub(exc)}"
-        log.warning("%s (%s) call failed: %s", target.role, target.model, reason)
+        # Name the model and endpoint actually used, so a typo in a dashboard value is
+        # visible straight from /health.
+        reason = (
+            f"model={target.model!r} base={target.api_base!r} -> "
+            f"{type(exc).__name__}: {_scrub(exc)}"
+        )
+        log.warning("%s call failed: %s", target.role, reason)
         _record(target, False, reason)
         return None
 

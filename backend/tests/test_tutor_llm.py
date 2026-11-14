@@ -513,3 +513,24 @@ def test_a_key_in_a_provider_error_is_scrubbed(primary, monkeypatch, client):
     )
     llm_module.probe_primary()
     assert "meta-test-key" not in client.get("/health").json()["llm_reason"]
+
+
+def test_settings_strip_stray_whitespace_from_dashboard_values(monkeypatch):
+    from app.config import Settings
+
+    monkeypatch.setenv("LLM_MODEL", "openai/muse-spark-1.1 \n")
+    monkeypatch.setenv("LLM_API_BASE", " https://api.meta.ai/v1\n")
+    monkeypatch.setenv("LLM_API_KEY", "key-with-newline\n")
+    settings = Settings(_env_file=None)
+    assert settings.llm_model == "openai/muse-spark-1.1"
+    assert settings.llm_api_base == "https://api.meta.ai/v1"
+    assert settings.llm_api_key == "key-with-newline"
+
+
+def test_the_failure_reason_names_the_model_that_was_sent(primary, monkeypatch, client):
+    calls: list[dict] = []
+    install(monkeypatch, {PRIMARY: Exception("The requested model was not found.")}, calls)
+    llm_module.probe_primary()
+    reason = client.get("/health").json()["llm_reason"]
+    assert "muse-spark-1.1" in reason and "api.meta.ai" in reason
+    assert "meta-test-key" not in reason

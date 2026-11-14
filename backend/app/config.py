@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +38,13 @@ class Settings(BaseSettings):
     db_path: str = "./reconcore.db"
     cors_origins: str = "http://localhost:3000,https://reconcore-app.netlify.app,https://reconcore.vercel.app"
     public_base_url: str = "http://localhost:8000"
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip_text(cls, value):
+        """Dashboard text boxes happily keep a trailing space or newline, which turns
+        `muse-spark-1.1` into a model the provider has never heard of. Strip them."""
+        return value.strip() if isinstance(value, str) else value
 
     @property
     def cors_origin_list(self) -> list[str]:
